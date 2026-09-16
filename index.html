@@ -17,7 +17,7 @@
       <span class="brand__mark" aria-hidden="true">F</span>
       <div><h1>퍼리업 전투 실험실</h1><p>턴제 밸런스 프로토타입</p></div>
     </div>
-    <div class="topbar__meta"><span class="signal"></span> 규칙 세트 <b>α-01</b><span class="divider"></span><span id="seed-label">SEED 240914</span></div>
+    <div class="topbar__meta"><span class="signal"></span> 규칙 세트 <b>α-02</b><span class="divider"></span><span id="seed-label">SEED 240914</span></div>
   </header>
 
   <main class="workspace">
@@ -32,7 +32,7 @@
       </div>
       <div class="roster-tools"><label class="search"><span aria-hidden="true">⌕</span><input id="roster-search" type="search" placeholder="캐릭터 검색" aria-label="캐릭터 검색"></label><select id="role-filter" aria-label="역할군 필터"><option value="all">모든 역할</option><option>암살자</option><option>보호자</option><option>돌격자</option><option>결전자</option><option>교란자</option><option>추격자</option><option>치유자</option></select></div>
       <div id="roster" class="roster" aria-label="캐릭터 도감"></div>
-      <p class="source-note"><a href="https://hk-rocketmonster.jetsomk22.workers.dev/" target="_blank" rel="noreferrer">로켓몬스터 도감</a> 42종 · 초상화와 기본 능력치 반영</p>
+      <p class="source-note"><a href="https://hk-rocketmonster.jetsomk22.workers.dev/" target="_blank" rel="noreferrer">로켓몬스터 도감</a> 42종 · 리메이크 문서의 기재 항목만 우선 반영</p>
     </section>
 
     <section class="panel arena" aria-labelledby="arena-title">
@@ -60,8 +60,8 @@
           <label>HP 배수<input id="hp-multiplier" data-setting="hpMultiplier" type="number" value="10" min="1" max="100"></label>
           <label>공격 계수<input id="attack-factor" data-setting="attackFactor" type="number" value="2" min="0.1" max="10" step="0.1"></label>
           <label>최소 피해<input data-setting="minDamage" type="number" value="1" min="0" max="999"></label>
-          <label>스킬 피해<input id="skill-damage" data-setting="skillDamage" type="number" value="2" min="0" max="999"></label>
-          <label>스킬 비용<input id="skill-cost" data-setting="skillCost" type="number" value="3" min="1" max="99"></label>
+          <label>미정 스킬 피해<input id="skill-damage" data-setting="skillDamage" type="number" value="2" min="0" max="999"></label>
+          <label>미정 스킬 비용<input id="skill-cost" data-setting="skillCost" type="number" value="3" min="1" max="99"></label>
           <label>투지 획득<input data-setting="gritGain" type="number" value="1" min="0" max="99"></label>
           <label>회피 확률 %<input data-setting="dodgeRate" type="number" value="15" min="0" max="100"></label>
           <label>최대 턴<input data-setting="maxTurns" type="number" value="100" min="1" max="1000"></label>
@@ -71,12 +71,12 @@
       </div>
       <div class="analysis-tabs" role="tablist"><button class="is-active" data-analysis-tab="log" role="tab" aria-selected="true">전투 로그</button><button data-analysis-tab="results" role="tab" aria-selected="false">결과 요약</button></div>
       <div id="battle-log" class="battle-log" role="log" aria-live="off"><div class="log-entry log-entry--system"><span>준비</span><p>편성을 확인하고 전투를 시작하세요.</p></div></div>
-      <div class="legend"><span><i class="dot dot--a"></i>A팀</span><span><i class="dot dot--b"></i>B팀</span><span><i class="dot dot--skill"></i>고정 피해 스킬</span></div>
+      <div class="legend"><span><i class="dot dot--a"></i>A팀</span><span><i class="dot dot--b"></i>B팀</span><span><i class="dot dot--skill"></i>스킬·상태 효과</span></div>
     </aside>
   </main>
 
   <dialog id="editor-dialog" class="editor-dialog"><form method="dialog"><button class="dialog-close" value="cancel" aria-label="닫기">×</button><div id="editor-content"></div></form></dialog>
-  <dialog id="rules-dialog" class="rules-dialog"><form method="dialog"><button class="dialog-close" value="cancel" aria-label="닫기">×</button><span class="eyebrow">RULE SET · α-01</span><h2>현재 전투 규칙</h2><div id="rules-content"></div></form></dialog>
+  <dialog id="rules-dialog" class="rules-dialog"><form method="dialog"><button class="dialog-close" value="cancel" aria-label="닫기">×</button><span class="eyebrow">RULE SET · α-02</span><h2>현재 전투 규칙</h2><div id="rules-content"></div></form></dialog>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 </body>
 </html>

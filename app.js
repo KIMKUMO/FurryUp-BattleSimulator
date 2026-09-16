@@ -7,6 +7,21 @@ const ROLE_EFFECTS = {
   "교란자": { name: "교란 회피", description: "기본 공격과 스킬을 피격 행동당 15% 확률로 회피합니다." }
 };
 
+const FALLBACK_PASSIVE = {
+  id: "document_pending",
+  name: "개별 패시브 미정",
+  description: "리메이크 문서에 개별 패시브가 아직 기재되지 않아 역할군 효과만 적용됩니다.",
+  implemented: false
+};
+const fallbackSkill = () => ({
+  id: "prototype_damage",
+  name: "실험용 공통 스킬",
+  cost: settings.skillCost,
+  description: `단일 대상에게 방어력을 무시하는 고정 피해 ${settings.skillDamage}를 줍니다. 문서 미정 캐릭터에게만 적용됩니다.`,
+  implemented: true,
+  provisional: true
+});
+
 const catalog = window.ROCKETMONSTERS.map(character => ({
   ...character,
   mechanicRole: ROLE_MAP[character.sourceRole] || character.sourceRole
@@ -53,6 +68,31 @@ const teamName = side => `${side}팀`;
 const enemySide = side => side === "A" ? "B" : "A";
 const memberTotal = member => member.hp + member.atk + member.def + member.spd;
 const roleEffect = character => ROLE_EFFECTS[character.mechanicRole];
+const passiveEffect = character => character.passive || FALLBACK_PASSIVE;
+const skillEffect = character => character.skill || fallbackSkill();
+const skillCostFor = character => Number(skillEffect(character).cost ?? settings.skillCost);
+const skillReady = unit => unit.grit >= skillCostFor(unit) && canUseSkill(unit);
+
+function teamHasPassive(side, passiveId) {
+  return Boolean(battle?.units.some(unit => unit.side === side && unit.alive && passiveEffect(unit).id === passiveId));
+}
+
+function shieldStatBonus(unit) {
+  return unit.alive && unit.shield > 0 && teamHasPassive(unit.side, "calm_sea") ? 2 : 0;
+}
+
+function effectiveAttack(unit) {
+  return unit.attack + Number(unit.howlBuff || 0) + shieldStatBonus(unit);
+}
+
+function effectiveSpeed(unit) {
+  return unit.speed + shieldStatBonus(unit);
+}
+
+function effectivePriority(unit) {
+  const skillPriority = skillReady(unit) ? Number(skillEffect(unit).priority || 0) : 0;
+  return unit.priority + skillPriority;
+}
 
 function showToast(message) {
   const toast = $("#toast");
@@ -88,6 +128,9 @@ function previewUnit(member, side, slot) {
     currentHp: maxHp,
     shield: 0,
     grit: 0,
+    statuses: {},
+    charge: 0,
+    fullness: 0,
     alive: true,
     attack: member.atk,
     defense: member.def,
@@ -133,19 +176,34 @@ function currentUnits(side) {
   return teams[side].map((member, slot) => previewUnit(member, side, slot));
 }
 
+function statusLabels(unit) {
+  const labels = [];
+  if (unit.statuses?.poison) labels.push(`독 ${2 ** (unit.statuses.poison.stage + 1)}%`);
+  if (unit.statuses?.bleed) labels.push("출혈 5%");
+  if (unit.statuses?.mark) labels.push("표식");
+  if (unit.statuses?.current) labels.push("물살");
+  if (unit.statuses?.stunActions > 0) labels.push("기절");
+  if (unit.charge > 0) labels.push(`차지 ${unit.charge}`);
+  if (unit.fullness > 0) labels.push(`배부름 ${unit.fullness}`);
+  if (unit.howlBuff > 0) labels.push("공격 +2");
+  return labels;
+}
+
 function fighterCard(unit) {
   const hpPercent = clamp((unit.currentHp / unit.maxHp) * 100, 0, 100);
   const active = battle?.currentActorUid === unit.uid;
   const hit = battle?.lastTargetUid === unit.uid;
   const classes = ["fighter", active ? "is-active" : "", hit ? "is-hit" : "", unit.alive ? "" : "is-dead"].filter(Boolean).join(" ");
-  const shield = unit.shield > 0 ? `<span class="fighter__shield">보호막 ${unit.shield}</span>` : `<span>투지 ${unit.grit}</span>`;
-  return `<article class="${classes}" data-unit="${unit.uid}" aria-label="${unit.name}, 체력 ${unit.currentHp}/${unit.maxHp}, 투지 ${unit.grit}${unit.alive ? "" : ", 전투불능"}"><img src="${unit.image}" alt=""><strong class="fighter__name">${escapeHtml(unit.name)}</strong><div class="meter" role="meter" aria-valuemin="0" aria-valuemax="${unit.maxHp}" aria-valuenow="${unit.currentHp}" aria-label="${unit.name} 체력"><i style="width:${hpPercent}%"></i></div><div class="fighter__meta"><span>HP ${unit.currentHp}/${unit.maxHp}</span>${shield}</div></article>`;
+  const combatMeta = unit.shield > 0 ? `<span class="fighter__shield">투지 ${unit.grit} · 보호막 ${unit.shield}</span>` : `<span>투지 ${unit.grit}</span>`;
+  const statuses = statusLabels(unit);
+  const statusHtml = statuses.length ? `<div class="fighter__statuses">${statuses.map(label => `<span>${escapeHtml(label)}</span>`).join("")}</div>` : "";
+  return `<article class="${classes}" data-unit="${unit.uid}" aria-label="${unit.name}, 체력 ${unit.currentHp}/${unit.maxHp}, 투지 ${unit.grit}${statuses.length ? `, 상태 ${statuses.join(", ")}` : ""}${unit.alive ? "" : ", 전투불능"}"><img src="${unit.image}" alt=""><strong class="fighter__name">${escapeHtml(unit.name)}</strong><div class="meter" role="meter" aria-valuemin="0" aria-valuemax="${unit.maxHp}" aria-valuenow="${unit.currentHp}" aria-label="${unit.name} 체력"><i style="width:${hpPercent}%"></i></div><div class="fighter__meta"><span>HP ${unit.currentHp}/${unit.maxHp}</span>${combatMeta}</div>${statusHtml}</article>`;
 }
 
 function sortUnits(units) {
   return [...units].sort((left, right) =>
-    right.priority - left.priority ||
-    right.speed - left.speed ||
+    effectivePriority(right) - effectivePriority(left) ||
+    effectiveSpeed(right) - effectiveSpeed(left) ||
     left.slot - right.slot ||
     (left.side === "A" ? -1 : 1)
   );
@@ -176,7 +234,8 @@ function renderArena() {
 }
 
 function logEntryHtml(entry) {
-  const className = entry.kind === "system" ? "log-entry--system" : entry.kind === "ko" ? "log-entry--ko" : entry.action === "skill" ? "log-entry--skill" : `log-entry--${entry.side?.toLowerCase() || "system"}`;
+  const specialKinds = ["system", "ko", "status", "passive", "heal", "shield"];
+  const className = specialKinds.includes(entry.kind) ? `log-entry--${entry.kind}` : entry.action === "skill" ? "log-entry--skill" : `log-entry--${entry.side?.toLowerCase() || "system"}`;
   return `<div class="log-entry ${className}"><span>${escapeHtml(entry.label)}</span><p>${escapeHtml(entry.message)}</p></div>`;
 }
 
@@ -197,7 +256,7 @@ function renderResults() {
   const latest = resultHistory[0];
   const previous = resultHistory[1];
   const comparison = previous ? `<p>직전 실행 대비 턴 ${latest.turns - previous.turns >= 0 ? "+" : ""}${latest.turns - previous.turns}, A팀 잔여 HP ${latest.remainingHp.A - previous.remainingHp.A >= 0 ? "+" : ""}${latest.remainingHp.A - previous.remainingHp.A}, B팀 잔여 HP ${latest.remainingHp.B - previous.remainingHp.B >= 0 ? "+" : ""}${latest.remainingHp.B - previous.remainingHp.B}</p>` : `<p>다음 실행부터 직전 결과와 변화량을 표시합니다.</p>`;
-  $("#battle-log").innerHTML = `<div class="result-hero"><span>최근 실행 · SEED ${latest.seed}</span><strong>${escapeHtml(latest.title)}</strong><div class="result-stats"><div class="result-stat"><span>종료 턴</span><b>${latest.turns}</b></div><div class="result-stat"><span>A팀 잔여 HP</span><b>${latest.remainingHp.A}</b></div><div class="result-stat"><span>B팀 잔여 HP</span><b>${latest.remainingHp.B}</b></div></div>${comparison}</div>${resultHistory.map((result, index) => `<div class="history-card"><div class="history-card__top"><b>#${resultHistory.length - index} ${escapeHtml(result.title)}</b><span>${result.turns}턴</span></div><p>생존 A ${result.survivors.A} · B ${result.survivors.B} / 피해 A ${result.damage.A} · B ${result.damage.B}<br>공격계수 ${result.settings.attackFactor} · 스킬 ${result.settings.skillDamage} · 회피 ${result.settings.dodgeRate}%</p></div>`).join("")}`;
+  $("#battle-log").innerHTML = `<div class="result-hero"><span>최근 실행 · SEED ${latest.seed}</span><strong>${escapeHtml(latest.title)}</strong><div class="result-stats"><div class="result-stat"><span>종료 턴</span><b>${latest.turns}</b></div><div class="result-stat"><span>A팀 잔여 HP</span><b>${latest.remainingHp.A}</b></div><div class="result-stat"><span>B팀 잔여 HP</span><b>${latest.remainingHp.B}</b></div></div>${comparison}</div>${resultHistory.map((result, index) => `<div class="history-card"><div class="history-card__top"><b>#${resultHistory.length - index} ${escapeHtml(result.title)}</b><span>${result.turns}턴</span></div><p>생존 A ${result.survivors.A} · B ${result.survivors.B} / 총 피해 A ${result.damage.A} · B ${result.damage.B}<br>상태 피해 A ${result.statusDamage.A} · B ${result.statusDamage.B} / 회복 A ${result.healing.A} · B ${result.healing.B}<br>스킬 사용 A ${result.skills.A} · B ${result.skills.B} · 회피 ${result.settings.dodgeRate}%</p></div>`).join("")}`;
 }
 
 function renderAnalysis() {
@@ -275,12 +334,20 @@ function beginBattle() {
       catalogId: member.catalogId,
       name: character.name,
       image: character.image,
+      species: character.species,
+      type: character.type,
       sourceRole: character.sourceRole,
       mechanicRole: character.mechanicRole,
+      passive: character.passive,
+      skill: character.skill,
       maxHp,
       currentHp: maxHp,
       shield: 0,
       grit: 0,
+      statuses: {},
+      charge: 0,
+      fullness: 0,
+      howlBuff: 0,
       alive: true,
       priority: member.priority,
       attack: member.atk,
@@ -288,6 +355,12 @@ function beginBattle() {
       speed: member.spd,
       duelBuffed: false,
       damageDealt: 0,
+      directDamage: 0,
+      statusDamage: 0,
+      healingDone: 0,
+      shieldingDone: 0,
+      basicUses: 0,
+      skillUses: 0,
       kills: 0
     };
   }));
@@ -301,13 +374,20 @@ function beginBattle() {
     actionInTurn: 0,
     currentActorUid: null,
     lastTargetUid: null,
+    teamEffects: { A: { howlPending: false }, B: { howlPending: false } },
     startedAt: Date.now(),
     result: null
   };
   pushLog({ kind: "system", label: "START", message: `전투 시작 · ${settings.seed} 시드 · ${teams.A.length} 대 ${teams.B.length}` });
   for (const unit of units.filter(item => item.mechanicRole === "보호자")) {
-    unit.shield = Math.floor(unit.maxHp * 0.1);
-    pushLog({ kind: "system", label: "PASSIVE", message: `${unit.name}이(가) 초기 보호막 ${unit.shield}을 얻었습니다.` });
+    const gained = addShield(unit, Math.floor(unit.maxHp * 0.1));
+    pushLog({ kind: "system", label: "STAGE", message: `${unit.name}이(가) 역할군 효과로 보호막 ${gained}을 얻었습니다.` });
+  }
+  for (const unit of units.filter(item => item.alive && passiveEffect(item).id === "seeping_current")) {
+    const target = aliveUnits(enemySide(unit.side)).sort((left, right) => right.slot - left.slot)[0];
+    if (!target) continue;
+    const applied = applyHarmfulStatus(target, "current", { sourceUid: unit.uid });
+    pushLog({ kind: "system", label: "STAGE", message: applied ? `${unit.name}의 물살이 ${target.name}에게 적용되었습니다.` : `${target.name}이(가) ${unit.name}의 물살을 무효화했습니다.` });
   }
   activeAnalysisTab = "log";
   renderAll();
@@ -317,6 +397,15 @@ function beginBattle() {
 function startTurn() {
   battle.turn += 1;
   battle.actionInTurn = 0;
+
+  for (const unit of battle.units) unit.howlBuff = 0;
+  for (const side of ["A", "B"]) {
+    if (!battle.teamEffects[side].howlPending) continue;
+    for (const unit of aliveUnits(side)) unit.howlBuff = 2;
+    battle.teamEffects[side].howlPending = false;
+    pushLog({ kind: "passive", label: `T${String(battle.turn).padStart(2, "0")}`, message: `${teamName(side)}의 하울링이 발동해 이번 턴 공격력이 2 증가합니다.` });
+  }
+
   if (battle.turn === 8) {
     for (const unit of battle.units.filter(item => item.alive && item.mechanicRole === "결전자" && !item.duelBuffed)) {
       unit.attack += 1;
@@ -326,6 +415,25 @@ function startTurn() {
       pushLog({ kind: "system", label: "T08", message: `${unit.name}의 후반 강화가 발동해 공격·방어·속도가 1 증가했습니다.` });
     }
   }
+
+  for (const unit of battle.units.filter(item => item.alive)) {
+    const passiveId = passiveEffect(unit).id;
+    if (passiveId === "shell_break" && battle.turn % 3 === 0) {
+      unit.defense -= 1;
+      unit.attack += 2;
+      pushLog({ kind: "passive", label: `T${String(battle.turn).padStart(2, "0")}`, message: `${unit.name}의 갑각 깨기 · 방어력 -1, 공격력 +2` });
+    }
+    if (passiveId === "kings_leap") {
+      unit.speed += 1;
+      pushLog({ kind: "passive", label: `T${String(battle.turn).padStart(2, "0")}`, message: `${unit.name}의 왕의 도약 · 속도 +1` });
+    }
+    if (unit.statuses.current && battle.turn % 3 === 0) {
+      const before = unit.grit;
+      unit.grit = Math.max(0, unit.grit - 1);
+      pushLog({ kind: "status", label: `T${String(battle.turn).padStart(2, "0")}`, message: `${unit.name}의 물살 · 투지 ${before}→${unit.grit}` });
+    }
+  }
+
   battle.queue = sortUnits(battle.units.filter(unit => unit.alive)).map(unit => unit.uid);
   pushLog({ kind: "system", label: `T${String(battle.turn).padStart(2, "0")}`, message: `${battle.turn}턴 시작 · 행동 순서를 다시 계산했습니다.` });
 }
@@ -357,6 +465,22 @@ function finishBattle(result, reason) {
       A: battle.units.filter(unit => unit.side === "A").reduce((sum, unit) => sum + unit.damageDealt, 0),
       B: battle.units.filter(unit => unit.side === "B").reduce((sum, unit) => sum + unit.damageDealt, 0)
     },
+    statusDamage: {
+      A: battle.units.filter(unit => unit.side === "A").reduce((sum, unit) => sum + unit.statusDamage, 0),
+      B: battle.units.filter(unit => unit.side === "B").reduce((sum, unit) => sum + unit.statusDamage, 0)
+    },
+    healing: {
+      A: battle.units.filter(unit => unit.side === "A").reduce((sum, unit) => sum + unit.healingDone, 0),
+      B: battle.units.filter(unit => unit.side === "B").reduce((sum, unit) => sum + unit.healingDone, 0)
+    },
+    shielding: {
+      A: battle.units.filter(unit => unit.side === "A").reduce((sum, unit) => sum + unit.shieldingDone, 0),
+      B: battle.units.filter(unit => unit.side === "B").reduce((sum, unit) => sum + unit.shieldingDone, 0)
+    },
+    skills: {
+      A: battle.units.filter(unit => unit.side === "A").reduce((sum, unit) => sum + unit.skillUses, 0),
+      B: battle.units.filter(unit => unit.side === "B").reduce((sum, unit) => sum + unit.skillUses, 0)
+    },
     settings: { ...settings }
   });
   resultHistory = resultHistory.slice(0, 4);
@@ -370,35 +494,380 @@ function checkWinner() {
   if (!aAlive && !bAlive) finishBattle("draw", "양 팀이 동시에 전투불능이 되었습니다.");
   else if (!aAlive) finishBattle("B", "A팀 전원이 전투불능입니다.");
   else if (!bAlive) finishBattle("A", "B팀 전원이 전투불능입니다.");
+  return battle?.status === "ended";
 }
 
-function selectTarget(actor) {
+function canUseSkill(actor) {
+  const skillId = skillEffect(actor).id;
+  const enemies = aliveUnits(enemySide(actor.side));
+  if (!enemies.length) return false;
+  if (skillId === "cut_throat") return enemies.some(unit => unit.statuses.mark?.sourceUid === actor.uid);
+  if (skillId === "bind") return enemies.some(unit => unit.statuses.current);
+  if (skillId === "feast_time") return actor.fullness > 0;
+  return true;
+}
+
+function selectTarget(actor, skillId = null) {
   const candidates = aliveUnits(enemySide(actor.side));
   if (!candidates.length) return null;
   const sorted = [...candidates].sort((left, right) => left.slot - right.slot);
+  if (skillId === "cut_throat") return sorted.find(unit => unit.statuses.mark?.sourceUid === actor.uid) || null;
+  if (skillId === "bind") return sorted.find(unit => unit.statuses.current) || null;
+  if (skillId === "weak_predation" || passiveEffect(actor).id === "despise_weak") {
+    return [...candidates].sort((left, right) => left.currentHp - right.currentHp || left.slot - right.slot)[0];
+  }
   return actor.mechanicRole === "암살자" ? sorted.at(-1) : sorted[0];
 }
 
-function applyDamage(target, rawDamage) {
-  const shieldAbsorb = Math.min(target.shield, rawDamage);
+function lowestHpAlly(side) {
+  return aliveUnits(side).sort((left, right) =>
+    left.currentHp / left.maxHp - right.currentHp / right.maxHp || left.slot - right.slot
+  )[0] || null;
+}
+
+function addShield(target, amount) {
+  if (!target?.alive) return 0;
+  const gained = Math.max(0, Math.floor(Number(amount) || 0));
+  target.shield += gained;
+  return gained;
+}
+
+function healUnit(source, target, amount) {
+  if (!target?.alive) return { healed: 0, shield: 0 };
+  const requested = Math.max(0, Math.floor(Number(amount) || 0));
+  if (!requested) return { healed: 0, shield: 0 };
+  if (passiveEffect(target).id === "healing_to_shield") {
+    const shield = addShield(target, requested);
+    if (source) source.shieldingDone += shield;
+    return { healed: 0, shield };
+  }
+  const before = target.currentHp;
+  target.currentHp = Math.min(target.maxHp, target.currentHp + requested);
+  const healed = target.currentHp - before;
+  if (source) source.healingDone += healed;
+  return { healed, shield: 0 };
+}
+
+function applyHarmfulStatus(target, type, payload = {}) {
+  if (!target?.alive || passiveEffect(target).id === "status_immunity") return false;
+  if (type === "mark") {
+    for (const unit of battle.units) {
+      if (unit.statuses.mark?.sourceUid === payload.sourceUid) delete unit.statuses.mark;
+    }
+    target.statuses.mark = { sourceUid: payload.sourceUid };
+    return true;
+  }
+  if (type === "stun") {
+    target.statuses.stunActions = Math.max(Number(target.statuses.stunActions || 0), Number(payload.actions || 1));
+    return true;
+  }
+  if (type === "poison") {
+    if (!target.statuses.poison) target.statuses.poison = { sourceUid: payload.sourceUid, stage: 0 };
+    return true;
+  }
+  if (type === "bleed") {
+    if (!target.statuses.bleed) target.statuses.bleed = { sourceUid: payload.sourceUid };
+    return true;
+  }
+  if (type === "current") {
+    if (!target.statuses.current) target.statuses.current = { sourceUid: payload.sourceUid };
+    return true;
+  }
+  return false;
+}
+
+function applyDamage(target, rawDamage, { bypassShield = false } = {}) {
+  const normalized = Number.isFinite(rawDamage) ? Math.max(0, Math.floor(rawDamage)) : target.currentHp + target.shield;
+  const wasAlive = target.alive;
+  const shieldAbsorb = bypassShield ? 0 : Math.min(target.shield, normalized);
   target.shield -= shieldAbsorb;
-  const hpDamage = Math.max(0, rawDamage - shieldAbsorb);
+  const hpLoss = Math.max(0, normalized - shieldAbsorb);
   const hpBefore = target.currentHp;
-  target.currentHp = Math.max(0, target.currentHp - hpDamage);
+  target.currentHp = Math.max(0, target.currentHp - hpLoss);
+  const hpDamage = hpBefore - target.currentHp;
   if (target.currentHp <= 0) target.alive = false;
-  return { shieldAbsorb, hpDamage, hpBefore, hpAfter: target.currentHp };
+  return { rawDamage: normalized, shieldAbsorb, hpDamage, hpBefore, hpAfter: target.currentHp, knockout: wasAlive && !target.alive };
+}
+
+function damageWithPassives(actor, target, rawDamage) {
+  let adjusted = Math.max(0, Number(rawDamage) || 0);
+  if (passiveEffect(actor).id === "blood_excitement" && actor.type === target.type) adjusted *= 1.2;
+  if (target.statuses.mark?.sourceUid === actor.uid) adjusted *= 1.2;
+  return Math.floor(adjusted);
+}
+
+function onKnockout(source, target) {
+  if (!source) return;
+  source.kills += 1;
+  if (source.mechanicRole === "돌격자" && source.alive) {
+    const recovery = Math.floor(source.maxHp * 0.05);
+    const result = healUnit(source, source, recovery);
+    if (result.healed || result.shield) {
+      pushLog({ kind: "passive", label: "KO", message: `${source.name}의 역할군 회복 · ${result.healed ? `HP +${result.healed}` : `보호막 +${result.shield}`}` });
+    }
+  }
+  if (teamHasPassive(source.side, "howling")) battle.teamEffects[source.side].howlPending = true;
+  if (passiveEffect(source).id === "kill_growth_pending") {
+    pushLog({ kind: "passive", label: "PENDING", message: `${source.name}의 배부름은 증가량이 문서 미정이라 능력치가 변하지 않습니다.` });
+  }
+}
+
+function resolveHit(actor, target, rawDamage, { allowDodge = true } = {}) {
+  let dodgeRoll = null;
+  let dodged = false;
+  if (allowDodge && target.mechanicRole === "교란자") {
+    dodgeRoll = battle.rng();
+    dodged = dodgeRoll < settings.dodgeRate / 100;
+  }
+  if (dodged) {
+    return { target, dodged: true, dodgeRoll, rawDamage: 0, shieldAbsorb: 0, hpDamage: 0, hpBefore: target.currentHp, hpAfter: target.currentHp, knockout: false };
+  }
+  const adjusted = damageWithPassives(actor, target, rawDamage);
+  const result = applyDamage(target, adjusted);
+  actor.damageDealt += result.hpDamage;
+  actor.directDamage += result.hpDamage;
+  if (passiveEffect(target).id === "charge_on_hit") target.charge += 1;
+  if (passiveEffect(target).id === "amplified_armor") target.attack += 2;
+  if (result.knockout) onKnockout(actor, target);
+  return { target, dodged: false, dodgeRoll, ...result };
+}
+
+function hitText(hit) {
+  if (hit.dodged) return `${hit.target.name} 회피(${hit.dodgeRoll.toFixed(3)})`;
+  const shield = hit.shieldAbsorb ? `·보호막 ${hit.shieldAbsorb}` : "";
+  const knockout = hit.knockout ? "·전투불능" : "";
+  return `${hit.target.name} ${hit.hpBefore}→${hit.hpAfter}${shield}${knockout}`;
+}
+
+function afterDirectDamage(actor, totalHpDamage) {
+  if (totalHpDamage <= 0) return [];
+  const notes = [];
+  const passiveId = passiveEffect(actor).id;
+  if (passiveId === "inhale") {
+    actor.grit += 1;
+    notes.push("들숨 투지 +1");
+  }
+  if (passiveId === "voracious_drain") {
+    const result = healUnit(actor, actor, Math.floor(totalHpDamage * 0.2));
+    if (result.healed > 0) {
+      actor.fullness += 1;
+      notes.push(`흡혈 HP +${result.healed}·배부름 ${actor.fullness}`);
+    }
+  }
+  if (passiveId === "conviction") {
+    const target = lowestHpAlly(actor.side);
+    const result = healUnit(actor, target, Math.floor(totalHpDamage * 0.2));
+    if (result.healed || result.shield) notes.push(`신념 ${target.name} ${result.healed ? `HP +${result.healed}` : `보호막 +${result.shield}`}`);
+  }
+  return notes;
+}
+
+function executeBasicAttack(actor) {
+  const target = selectTarget(actor);
+  if (!target) return { hits: [], notes: ["공격할 대상 없음"] };
+  const rawDamage = Math.max(settings.minDamage, Math.floor(effectiveAttack(actor) * settings.attackFactor - target.defense));
+  const hit = resolveHit(actor, target, rawDamage);
+  const notes = [];
+  if (!hit.dodged && target.alive && passiveEffect(actor).id === "mark_prey") {
+    const applied = applyHarmfulStatus(target, "mark", { sourceUid: actor.uid });
+    notes.push(applied ? `${target.name} 표식` : `${target.name} 표식 면역`);
+  }
+  return { hits: [hit], notes };
+}
+
+function executeSkill(actor, skill) {
+  const enemies = aliveUnits(enemySide(actor.side)).sort((left, right) => left.slot - right.slot);
+  const allies = aliveUnits(actor.side).sort((left, right) => left.slot - right.slot);
+  const hits = [];
+  const notes = [];
+  const attack = effectiveAttack(actor);
+  const speed = effectiveSpeed(actor);
+  const hitOne = (target, damage) => {
+    if (!target) return null;
+    const hit = resolveHit(actor, target, damage);
+    hits.push(hit);
+    return hit;
+  };
+  const hitAll = damage => enemies.slice().forEach(target => hitOne(target, damage));
+
+  switch (skill.id) {
+    case "self_destruct": {
+      hitAll(attack * actor.charge);
+      const selfResult = applyDamage(actor, actor.maxHp);
+      if (selfResult.knockout) notes.push(`${actor.name} 자폭으로 전투불능`);
+      else notes.push(`${actor.name} 자폭 피해 ${selfResult.rawDamage}`);
+      break;
+    }
+    case "weak_predation": {
+      const hit = hitOne(selectTarget(actor, skill.id), attack * 3);
+      if (hit && !hit.dodged) {
+        const result = healUnit(actor, actor, Math.floor(hit.hpDamage * 0.3));
+        if (result.healed || result.shield) notes.push(`흡수 ${result.healed ? `HP +${result.healed}` : `보호막 +${result.shield}`}`);
+      }
+      break;
+    }
+    case "sea_poison": {
+      for (const target of enemies.slice()) {
+        const hit = hitOne(target, Math.floor(attack / 2));
+        if (!hit || hit.dodged || !target.alive) continue;
+        const roll = battle.rng();
+        if (roll < 0.3) {
+          const applied = applyHarmfulStatus(target, "poison", { sourceUid: actor.uid });
+          notes.push(applied ? `${target.name} 독(${roll.toFixed(3)})` : `${target.name} 독 면역`);
+        }
+      }
+      break;
+    }
+    case "blessing": {
+      const target = lowestHpAlly(actor.side);
+      const result = healUnit(actor, target, Math.floor(target.maxHp * 0.1));
+      notes.push(`${target.name} ${result.healed ? `HP +${result.healed}` : result.shield ? `보호막 +${result.shield}` : "변화 없음"}`);
+      break;
+    }
+    case "cut_throat": {
+      const target = selectTarget(actor, skill.id);
+      hitOne(target, attack * 3);
+      if (target?.statuses.mark?.sourceUid === actor.uid) delete target.statuses.mark;
+      notes.push("표식 제거");
+      break;
+    }
+    case "hunt_start": {
+      for (const target of enemies) {
+        if (passiveEffect(target).id === "status_immunity") notes.push(`${target.name} 방어 감소 면역`);
+        else {
+          target.defense -= 1;
+          notes.push(`${target.name} 방어력 -1`);
+        }
+      }
+      break;
+    }
+    case "smash":
+      hitOne(selectTarget(actor, skill.id), attack * 3);
+      break;
+    case "sea_wave":
+      for (const target of allies.filter(unit => unit.type === "해")) {
+        const gained = addShield(target, Math.floor(target.maxHp * 0.1));
+        actor.shieldingDone += gained;
+        notes.push(`${target.name} 보호막 +${gained}`);
+      }
+      break;
+    case "exhale":
+      for (const target of allies.filter(unit => unit.uid !== actor.uid)) {
+        target.grit += 1;
+        notes.push(`${target.name} 투지 +1`);
+      }
+      break;
+    case "full_barrage":
+      hitAll(attack * 1.5);
+      break;
+    case "kings_leap_attack":
+      hitOne(selectTarget(actor, skill.id), attack + speed);
+      break;
+    case "molt":
+      actor.defense -= 1;
+      actor.speed -= 1;
+      actor.attack += 3;
+      notes.push("방어력 -1·속도 -1·공격력 +3");
+      break;
+    case "feast_time":
+      enemies.slice(0, Math.min(actor.fullness, enemies.length)).forEach(target => hitOne(target, attack * 1.5));
+      notes.push(`배부름 ${actor.fullness} · 대상 ${hits.length}명`);
+      break;
+    case "bind": {
+      const target = selectTarget(actor, skill.id);
+      const applied = applyHarmfulStatus(target, "stun", { sourceUid: actor.uid, actions: 1 });
+      notes.push(applied ? `${target.name} 다음 행동 기절` : `${target.name} 기절 면역`);
+      break;
+    }
+    case "sharp_teeth": {
+      const target = selectTarget(actor, skill.id);
+      const hit = hitOne(target, attack * 2);
+      if (hit && !hit.dodged && target.alive) {
+        const applied = applyHarmfulStatus(target, "bleed", { sourceUid: actor.uid });
+        notes.push(applied ? `${target.name} 출혈` : `${target.name} 출혈 면역`);
+      }
+      break;
+    }
+    case "perseverance":
+      hitAll(attack);
+      for (const target of allies.filter(unit => unit.alive)) {
+        const gained = addShield(target, 10);
+        actor.shieldingDone += gained;
+        notes.push(`${target.name} 보호막 +${gained}`);
+      }
+      break;
+    case "leaf_guard":
+      for (const target of allies) {
+        const gained = addShield(target, Math.floor(target.maxHp * 0.2));
+        actor.shieldingDone += gained;
+        notes.push(`${target.name} 보호막 +${gained}`);
+      }
+      break;
+    default:
+      hitOne(selectTarget(actor, skill.id), settings.skillDamage);
+      break;
+  }
+  return { hits, notes };
+}
+
+function finishTurn() {
+  const label = `T${String(battle.turn).padStart(2, "0")}`;
+  const statusMessages = [];
+  for (const unit of battle.units.filter(item => item.alive)) {
+    if (unit.statuses.poison) {
+      const status = unit.statuses.poison;
+      const percent = 2 * (2 ** status.stage);
+      const source = battle.units.find(item => item.uid === status.sourceUid) || null;
+      const result = applyDamage(unit, Math.floor(unit.currentHp * percent / 100), { bypassShield: true });
+      status.stage += 1;
+      if (source) {
+        source.damageDealt += result.hpDamage;
+        source.statusDamage += result.hpDamage;
+      }
+      statusMessages.push(`${unit.name} 독 ${percent}% · HP ${result.hpBefore}→${result.hpAfter}`);
+      if (result.knockout) onKnockout(source, unit);
+    }
+    if (unit.alive && unit.statuses.bleed) {
+      const status = unit.statuses.bleed;
+      const source = battle.units.find(item => item.uid === status.sourceUid) || null;
+      const result = applyDamage(unit, Math.floor(unit.maxHp * 0.05), { bypassShield: true });
+      if (source) {
+        source.damageDealt += result.hpDamage;
+        source.statusDamage += result.hpDamage;
+      }
+      statusMessages.push(`${unit.name} 출혈 5% · HP ${result.hpBefore}→${result.hpAfter}`);
+      if (result.knockout) onKnockout(source, unit);
+    }
+  }
+  if (statusMessages.length) pushLog({ kind: "status", label, message: statusMessages.join(" / ") });
+  if (checkWinner()) return;
+
+  for (const source of battle.units.filter(item => item.alive && passiveEffect(item).id === "life_affinity")) {
+    const healed = [];
+    for (const target of aliveUnits(source.side).filter(unit => unit.shield > 0)) {
+      const result = healUnit(source, target, Math.floor(target.currentHp * 0.1));
+      if (result.healed || result.shield) healed.push(`${target.name} ${result.healed ? `HP +${result.healed}` : `보호막 +${result.shield}`}`);
+    }
+    if (healed.length) pushLog({ kind: "passive", label, message: `${source.name}의 생명친화 · ${healed.join(" / ")}` });
+  }
+  pushLog({ kind: "system", label, message: `${battle.turn}턴 종료` });
 }
 
 function advanceOneAction({ render = true } = {}) {
   if (!battle || battle.status === "ended") return false;
   battle.lastTargetUid = null;
   while (!battle.queue.length) {
+    if (battle.turn > 0) {
+      finishTurn();
+      if (battle.status === "ended") return false;
+    }
     if (battle.turn >= settings.maxTurns) {
       finishBattle("draw", `${settings.maxTurns}턴 제한에 도달했습니다.`);
       return false;
     }
     startTurn();
   }
+
   let actor = null;
   while (battle.queue.length && !actor) {
     const uidValue = battle.queue.shift();
@@ -406,66 +875,49 @@ function advanceOneAction({ render = true } = {}) {
     if (candidate?.alive) actor = candidate;
   }
   if (!actor) return advanceOneAction({ render });
-  const target = selectTarget(actor);
-  if (!target) {
-    finishBattle(actor.side, `${teamName(enemySide(actor.side))}에 생존자가 없습니다.`);
-    return false;
-  }
 
   battle.currentActorUid = actor.uid;
-  battle.lastTargetUid = target.uid;
-  const gritBefore = actor.grit;
-  const usesSkill = actor.grit >= settings.skillCost;
-  if (usesSkill) actor.grit -= settings.skillCost;
-  const action = usesSkill ? "skill" : "basic";
-  const rawDamage = usesSkill ? settings.skillDamage : Math.max(settings.minDamage, Math.floor(actor.attack * settings.attackFactor - target.defense));
-  let dodgeRoll = null;
-  let dodged = false;
-  if (target.mechanicRole === "교란자") {
-    dodgeRoll = battle.rng();
-    dodged = dodgeRoll < settings.dodgeRate / 100;
-  }
-  const result = dodged ? { shieldAbsorb: 0, hpDamage: 0, hpBefore: target.currentHp, hpAfter: target.currentHp } : applyDamage(target, rawDamage);
-  actor.damageDealt += result.hpDamage;
-  let heal = 0;
-  const knockout = !target.alive;
-  if (knockout) {
-    actor.kills += 1;
-    if (actor.mechanicRole === "돌격자") {
-      heal = Math.floor(actor.maxHp * 0.05);
-      actor.currentHp = Math.min(actor.maxHp, actor.currentHp + heal);
-    }
-  }
-  actor.grit += settings.gritGain;
   battle.actionInTurn += 1;
-
-  let message;
-  if (dodged) {
-    message = `${actor.name}의 ${usesSkill ? "스킬" : "기본 공격"}을(를) ${target.name}이(가) 회피했습니다. (판정 ${dodgeRoll.toFixed(3)})`;
-  } else {
-    const shieldText = result.shieldAbsorb ? `, 보호막 ${result.shieldAbsorb} 흡수` : "";
-    const koText = knockout ? " · 전투불능" : "";
-    const healText = heal ? ` · ${actor.name} HP ${heal} 회복` : "";
-    message = `${actor.name} → ${target.name} · ${usesSkill ? `스킬 고정 피해 ${rawDamage}` : `기본 피해 ${rawDamage}`}${shieldText} · HP ${result.hpBefore}→${result.hpAfter}${koText}${healText}`;
+  const label = `T${battle.turn}.${String(battle.actionInTurn).padStart(2, "0")}`;
+  if (actor.statuses.stunActions > 0) {
+    actor.statuses.stunActions -= 1;
+    pushLog({ kind: "status", side: actor.side, action: "stun", label, message: `${actor.name}은(는) 기절로 행동하지 못했습니다.` });
+    if (render) renderAll();
+    return true;
   }
+
+  const gritBefore = actor.grit;
+  const skill = skillEffect(actor);
+  const usesSkill = skillReady(actor);
+  if (usesSkill) {
+    actor.grit -= skillCostFor(actor);
+    actor.skillUses += 1;
+  } else {
+    actor.basicUses += 1;
+  }
+
+  const outcome = usesSkill ? executeSkill(actor, skill) : executeBasicAttack(actor);
+  const totalHpDamage = outcome.hits.reduce((sum, hit) => sum + hit.hpDamage, 0);
+  outcome.notes.push(...afterDirectDamage(actor, totalHpDamage));
+  actor.grit += settings.gritGain;
+  battle.lastTargetUid = outcome.hits[0]?.target.uid || null;
+
+  const actionName = usesSkill ? skill.name : "기본 공격";
+  const hitSummary = outcome.hits.length ? outcome.hits.map(hitText).join(" / ") : "피해 없음";
+  const noteSummary = outcome.notes.length ? ` · ${outcome.notes.join(" · ")}` : "";
+  const knockout = outcome.hits.some(hit => hit.knockout) || !actor.alive;
   pushLog({
-    kind: knockout ? "ko" : "action",
+    kind: knockout ? "ko" : usesSkill ? "skill" : "action",
     side: actor.side,
-    action,
-    label: `T${battle.turn}.${String(battle.actionInTurn).padStart(2, "0")}`,
-    message,
+    action: usesSkill ? "skill" : "basic",
+    label,
+    message: `${actor.name} · ${actionName} · ${hitSummary}${noteSummary} · 투지 ${gritBefore}→${actor.grit}`,
     actor: actor.uid,
-    target: target.uid,
-    rawDamage,
-    shieldAbsorb: result.shieldAbsorb,
-    hpDamage: result.hpDamage,
-    hpBefore: result.hpBefore,
-    hpAfter: result.hpAfter,
+    targets: outcome.hits.map(hit => hit.target.uid),
+    hpDamage: totalHpDamage,
     gritBefore,
     gritAfter: actor.grit,
-    dodgeRoll,
-    knockout,
-    heal
+    knockout
   });
   checkWinner();
   if (render && battle?.status !== "ended") renderAll();
@@ -538,9 +990,32 @@ function openEditor(side, index) {
   }
   currentEditor = { side, index };
   const character = catalogById[member.catalogId];
-  const effect = roleEffect(character);
+  const role = roleEffect(character);
+  const passive = passiveEffect(character);
+  const skill = skillEffect(character);
   const mapped = character.sourceRole !== character.mechanicRole ? `${character.sourceRole} → ${character.mechanicRole} 규칙` : character.sourceRole;
-  $("#editor-content").innerHTML = `<div class="editor-head"><img src="${character.image}" alt=""><div><span class="eyebrow">${teamName(side)} · 슬롯 ${index + 1}</span><h2>${escapeHtml(character.name)}</h2><p>${escapeHtml(character.species)} · ${character.type} 타입</p><div class="role-chips"><span class="role-chip">${escapeHtml(mapped)}</span><span class="role-chip">스킬 고정 피해 ${settings.skillDamage}</span></div></div></div><div class="editor-stats"><label>체력<input data-editor-stat="hp" type="number" min="1" max="99" value="${member.hp}"></label><label>공격력<input data-editor-stat="atk" type="number" min="1" max="99" value="${member.atk}"></label><label>방어력<input data-editor-stat="def" type="number" min="1" max="99" value="${member.def}"></label><label>속도<input data-editor-stat="spd" type="number" min="1" max="99" value="${member.spd}"></label><label>우선도<input data-editor-stat="priority" type="number" min="-99" max="99" value="${member.priority}"></label></div><div id="editor-total" class="editor-total"><span>기본 스탯 합계</span><b>${memberTotal(member)}${settings.enforceStatCap ? " / 25" : ""}</b></div><div class="effect-grid"><div class="effect-card"><span>PASSIVE</span><strong>${escapeHtml(effect.name)}</strong><p>${escapeHtml(effect.description)}</p></div><div class="effect-card"><span>SKILL · 투지 ${settings.skillCost}</span><strong>실험용 공통 스킬</strong><p>단일 대상에게 방어력을 무시하는 고정 피해 ${settings.skillDamage}. 회피와 보호막은 적용됩니다.</p></div></div><div class="editor-actions"><div class="editor-actions__group"><button type="button" data-editor-action="left" ${index === 0 ? "disabled" : ""}>← 앞 슬롯</button><button type="button" data-editor-action="right" ${index === teams[side].length - 1 ? "disabled" : ""}>뒤 슬롯 →</button></div><div class="editor-actions__group"><button type="button" data-editor-action="restore">원본 수치</button><button type="button" class="danger-button" data-editor-action="remove">편성 해제</button><button type="button" class="save-button" data-editor-action="save">적용</button></div></div>`;
+  const pending = (!character.passive || !character.skill) ? `<span class="role-chip role-chip--pending">빈 항목은 임시 규칙 유지</span>` : `<span class="role-chip">리메이크 문서 반영</span>`;
+  $("#editor-content").innerHTML = `
+    <div class="editor-head"><img src="${character.image}" alt=""><div>
+      <span class="eyebrow">${teamName(side)} · 슬롯 ${index + 1}</span>
+      <h2>${escapeHtml(character.name)}</h2>
+      <p>${escapeHtml(character.species)} · ${character.type} 타입</p>
+      <div class="role-chips"><span class="role-chip">${escapeHtml(mapped)}</span>${pending}</div>
+    </div></div>
+    <div class="editor-stats">
+      <label>체력<input data-editor-stat="hp" type="number" min="1" max="99" value="${member.hp}"></label>
+      <label>공격력<input data-editor-stat="atk" type="number" min="1" max="99" value="${member.atk}"></label>
+      <label>방어력<input data-editor-stat="def" type="number" min="1" max="99" value="${member.def}"></label>
+      <label>속도<input data-editor-stat="spd" type="number" min="1" max="99" value="${member.spd}"></label>
+      <label>우선도<input data-editor-stat="priority" type="number" min="-99" max="99" value="${member.priority}"></label>
+    </div>
+    <div id="editor-total" class="editor-total"><span>기본 스탯 합계</span><b>${memberTotal(member)}${settings.enforceStatCap ? " / 25" : ""}</b></div>
+    <div class="effect-grid effect-grid--three">
+      <div class="effect-card"><span>ROLE</span><strong>${escapeHtml(character.mechanicRole)} · ${escapeHtml(role.name)}</strong><p>${escapeHtml(role.description)}</p></div>
+      <div class="effect-card ${passive.implemented === false ? "is-pending" : ""}"><span>PASSIVE</span><strong>${escapeHtml(passive.name)}</strong><p>${escapeHtml(passive.description)}</p></div>
+      <div class="effect-card ${skill.provisional ? "is-pending" : ""}"><span>SKILL · 투지 ${skillCostFor(character)}${skill.priority ? ` · 우선도 +${skill.priority}` : ""}</span><strong>${escapeHtml(skill.name)}</strong><p>${escapeHtml(skill.description)}</p></div>
+    </div>
+    <div class="editor-actions"><div class="editor-actions__group"><button type="button" data-editor-action="left" ${index === 0 ? "disabled" : ""}>← 앞 슬롯</button><button type="button" data-editor-action="right" ${index === teams[side].length - 1 ? "disabled" : ""}>뒤 슬롯 →</button></div><div class="editor-actions__group"><button type="button" data-editor-action="restore">원본 수치</button><button type="button" class="danger-button" data-editor-action="remove">편성 해제</button><button type="button" class="save-button" data-editor-action="save">적용</button></div></div>`;
   $("#editor-dialog").showModal();
 }
 
@@ -605,16 +1080,21 @@ function editorAction(action) {
 
 function renderRules() {
   const rows = [
-    ["행동 순서", "매 턴 우선도↓ → 속도↓ → 슬롯↑ → 완전 동률이면 A팀 순으로 다시 계산"],
+    ["전투 시퀀스", "스테이지 시작 → 턴 시작 → 공격 시작 → 공격 타격/피격 → 공격 종료 → 턴 종료"],
+    ["행동 순서", "턴 시작에 스킬 우선도↓ → 속도↓ → 슬롯↑ → 완전 동률이면 A팀 순으로 고정"],
     ["기본 피해", `max(${settings.minDamage}, floor(공격력 × ${settings.attackFactor} − 방어력))`],
-    ["공통 스킬", `투지 ${settings.skillCost} 이상이면 자동 사용 · 방어 무시 고정 피해 ${settings.skillDamage} · 행동 후 투지 +${settings.gritGain}`],
+    ["캐릭터 스킬", `각 캐릭터의 투지 요구량 이상이면 자동 사용 · 모든 행동 종료 후 투지 +${settings.gritGain}`],
+    ["문서 미정 스킬", `개별 스킬이 비어 있는 캐릭터만 투지 ${settings.skillCost} · 방어 무시 고정 피해 ${settings.skillDamage} 임시 규칙 적용`],
+    ["독", "부여된 턴 종료부터 보호막을 무시하고 현재 HP의 2% → 4% → 8% → 16%… 피해 · 재부여 시 중첩/초기화 없음"],
+    ["출혈", "부여된 턴 종료부터 보호막을 무시하고 매 턴 최대 HP의 5% 피해 · 재부여 시 중첩 없음"],
+    ["정수 처리", "피해·회복·보호막의 소수점은 내림 · 회복은 최대 HP를 초과하지 않음"],
     ["암살자", ROLE_EFFECTS["암살자"].description],
     ["보호자 / 치유자", ROLE_EFFECTS["보호자"].description],
     ["돌격자 / 추격자", ROLE_EFFECTS["돌격자"].description],
     ["결전자", ROLE_EFFECTS["결전자"].description],
     ["교란자", ROLE_EFFECTS["교란자"].description.replace("15%", `${settings.dodgeRate}%`)],
     ["종료", `${settings.maxTurns}턴까지 승패가 없으면 무승부 · HP 0 이하는 즉시 전투불능`],
-    ["재현", `난수 시드 ${settings.seed} · 같은 설정과 편성이라면 같은 회피 결과`]
+    ["재현", `난수 시드 ${settings.seed} · 같은 설정과 편성이면 회피와 독 부여 결과가 동일`]
   ];
   $("#rules-content").innerHTML = `<div class="rules-grid">${rows.map(([title, description]) => `<div class="rule-row"><strong>${escapeHtml(title)}</strong><p>${escapeHtml(description)}</p></div>`).join("")}</div>`;
 }
@@ -676,6 +1156,24 @@ function registerWebMCP() {
         turn: battle?.turn || 0,
         teams: Object.fromEntries(["A", "B"].map(side => [side, teams[side].map(member => member.catalogId)])),
         settings: { ...settings },
+        units: battle?.units.map(unit => ({
+          id: unit.catalogId,
+          name: unit.name,
+          side: unit.side,
+          slot: unit.slot + 1,
+          hp: unit.currentHp,
+          maxHp: unit.maxHp,
+          shield: unit.shield,
+          grit: unit.grit,
+          attack: effectiveAttack(unit),
+          defense: unit.defense,
+          speed: effectiveSpeed(unit),
+          charge: unit.charge,
+          fullness: unit.fullness,
+          statuses: { ...unit.statuses },
+          alive: unit.alive
+        })) || [],
+        recentLogs: battle?.logs.slice(-20).map(entry => ({ label: entry.label, message: entry.message })) || [],
         result: resultHistory[0] || null
       })
     },
