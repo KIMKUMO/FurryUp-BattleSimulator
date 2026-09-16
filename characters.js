@@ -6,7 +6,7 @@ window.ROCKETMONSTERS = [
   }],
   ["CHR_002","네벨라","누에나방","공","돌격자",5,6,2,7,{
     documented:{role:true,stats:true,passive:true,skill:true},
-    passive:{id:"kill_growth_pending",name:"배부름",description:"적을 처치하면 공격력과 체력이 증가합니다. 증가량은 문서 미정이라 아직 전투에 적용하지 않습니다.",implemented:false},
+    passive:{id:"kill_growth",name:"배부름",description:"적을 처치하면 공격력 스탯이 3, 체력 스탯이 1 증가합니다. 체력 스탯 1은 최대·현재 HP 10으로 환산됩니다."},
     skill:{id:"weak_predation",cost:3,priority:1,name:"약자포식",description:"우선도 +1. 체력이 가장 낮은 적에게 공격력 × 3 피해를 주고, 실제 HP 피해의 30%를 회복합니다."}
   }],
   ["CHR_003","누디안","갯민숭달팽이","해","보호자",7,4,7,2,{

@@ -607,8 +607,11 @@ function onKnockout(source, target) {
     }
   }
   if (teamHasPassive(source.side, "howling")) battle.teamEffects[source.side].howlPending = true;
-  if (passiveEffect(source).id === "kill_growth_pending") {
-    pushLog({ kind: "passive", label: "PENDING", message: `${source.name}의 배부름은 증가량이 문서 미정이라 능력치가 변하지 않습니다.` });
+  if (passiveEffect(source).id === "kill_growth" && source.alive) {
+    source.attack += 3;
+    source.maxHp += 10;
+    source.currentHp += 10;
+    pushLog({ kind: "passive", label: "KO", message: `${source.name}의 배부름 · 공격력 +3 · 체력 스탯 +1 (HP ${source.currentHp}/${source.maxHp})` });
   }
 }
 
