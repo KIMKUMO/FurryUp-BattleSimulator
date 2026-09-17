@@ -19,3 +19,13 @@
 .fighter__meta{gap:5px;flex-wrap:wrap}.fighter__statuses{display:flex;flex-wrap:wrap;gap:3px;margin-top:5px}.fighter__statuses span{padding:2px 4px;border:1px solid rgba(241,189,98,.28);border-radius:4px;background:rgba(241,189,98,.08);color:#e7c985;font-size:8px;line-height:1.2}.effect-grid--three{grid-template-columns:repeat(3,1fr)}.effect-card.is-pending{border-style:dashed;opacity:.78}.role-chip--pending{border-style:dashed;color:#e7c985}.log-entry--status p{color:#f3ad7c}.log-entry--passive p{color:#82d9c8}.log-entry--heal p{color:#83d98e}.log-entry--shield p{color:#76bfff}
 @media(max-width:700px){.effect-grid--three{grid-template-columns:1fr}}
 @media(min-width:1181px){.workspace{height:calc(100vh - 76px);min-height:620px}.setup,.arena,.analysis{height:100%;min-height:0}.setup{display:flex;flex-direction:column;overflow:hidden}.setup .roster{height:auto;min-height:150px;flex:1}.arena{overflow:hidden}.arena .battlefield{min-height:0}.analysis{overflow:auto}.analysis .battle-log{height:auto;min-height:150px;flex:1}}
+
+/* Keep roster controls visible while only the character cards scroll. */
+.roster{height:auto;max-height:calc(100vh - 376px);padding-right:6px;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;grid-auto-rows:max-content;scrollbar-width:thin;scrollbar-color:var(--line-2) transparent}
+.roster::-webkit-scrollbar{width:8px}
+.roster::-webkit-scrollbar-track{background:transparent}
+.roster::-webkit-scrollbar-thumb{border:2px solid transparent;border-radius:999px;background:var(--line-2);background-clip:padding-box}
+.roster::-webkit-scrollbar-thumb:hover{background:var(--gold-2);background-clip:padding-box}
+@media(max-width:1180px){.roster{max-height:560px}}
+@media(max-width:780px){.roster{max-height:min(390px,55vh);min-height:240px}}
+@media(min-width:1181px){.setup .roster{max-height:none;min-height:150px}}
