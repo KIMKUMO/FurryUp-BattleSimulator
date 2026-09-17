@@ -1,13 +1,13 @@
 window.ROCKETMONSTERS = [
   ["CHR_001","괴룸파","우파루파","해","교란자",8,3,6,3,{
     documented:{role:true,stats:true,passive:true,skill:true},
-    passive:{id:"charge_on_hit",name:"늪의 살갗",description:"자신이 공격받을 때마다 차지가 1 증가합니다."},
-    skill:{id:"self_destruct",cost:10,name:"자폭",description:"적 전체에게 공격력 × 차지만큼 피해를 주고, 자신은 최대 체력의 100% 피해를 받습니다."}
+    passive:{id:"charge_on_hit",name:"늪의 살갖",description:"자신이 공격받을 때마다 차지가 1 증가합니다."},
+    skill:{id:"self_destruct",cost:6,name:"자폭",description:"적 전체에게 공격력 × 차지만큼 피해를 주고, 자신은 최대 체력의 100% 피해를 받습니다."}
   }],
   ["CHR_002","네벨라","누에나방","공","돌격자",5,6,2,7,{
     documented:{role:true,stats:true,passive:true,skill:true},
     passive:{id:"kill_growth",name:"배부름",description:"적을 처치하면 공격력 스탯이 3, 체력 스탯이 1 증가합니다. 체력 스탯 1은 최대·현재 HP 10으로 환산됩니다."},
-    skill:{id:"weak_predation",cost:3,priority:1,name:"약자포식",description:"우선도 +1. 체력이 가장 낮은 적에게 공격력 × 3 피해를 주고, 실제 HP 피해의 30%를 회복합니다."}
+    skill:{id:"weak_predation",cost:3,priority:1,name:"약자포식",description:"우선도 +1. 체력이 가장 낮은 적에게 공격력 × 2 피해를 주고, 실제 HP 피해의 30%를 회복합니다."}
   }],
   ["CHR_003","누디안","갯민숭달팽이","해","보호자",7,4,7,2,{
     documented:{role:true,stats:true,passive:true,skill:true},
@@ -32,7 +32,7 @@ window.ROCKETMONSTERS = [
   ["CHR_007","롭","바닷가재","해","결전자",7,3,8,2,{
     documented:{role:true,stats:true,passive:true,skill:true},
     passive:{id:"shell_break",name:"갑각 깨기",description:"3턴마다 자신의 방어력이 1 감소하고 공격력이 2 증가합니다."},
-    skill:{id:"smash",cost:3,name:"박살",description:"적 1명에게 공격력 × 3 피해를 줍니다."}
+    skill:{id:"smash",cost:3,name:"박살",description:"적 1명에게 공격력 × 2 피해를 줍니다."}
   }],
   ["CHR_008","루미","글라우쿠스 아틀란티쿠스","해","보호자",4,4,5,7,{
     documented:{role:true,stats:true,passive:true,skill:true},
@@ -106,7 +106,7 @@ window.ROCKETMONSTERS = [
   }],
   ["CHR_022","시엘라","은상어 · 클리오네","해","교란자",4,7,3,6,{
     documented:{role:true,stats:true,passive:true,skill:true},
-    passive:{id:"sacrificial_self_harm",name:"산제물",description:"공격할 때마다 자해를 1 얻습니다. 자해는 턴 종료 시 중첩당 최대 HP의 1% 피해를 줍니다."},
+    passive:{id:"sacrificial_self_harm",name:"산제물",description:"공격할 때마다 자해를 1 얻습니다. 자해는 턴 종료 시 중첩당 출혈의 절반인 최대 HP의 2.5% 피해를 줍니다."},
     skill:{id:"descent",cost:5,name:"강림",description:"스킬 사용 직전 자해 수만큼, 적 전체에게 각각 기본 공격 피해를 반복합니다."}
   }],
   ["CHR_023","아우렐라 & 펠리아","해파리","해","보호자",7,2,7,4,{
@@ -116,7 +116,7 @@ window.ROCKETMONSTERS = [
   }],
   ["CHR_024","아젤리아","백조","공","교란자",1,1,1,1,{
     documented:{role:true,stats:true,passive:true,skill:true},
-    passive:{id:"limited_time",name:"한정된 시간",description:"전투 시작 시 모든 스탯이 8 증가합니다. 턴 종료 시 모든 스탯이 2 감소하며, 이 효과로 HP는 10 아래로 감소하지 않습니다."},
+    passive:{id:"limited_time",name:"한정된 시간",description:"전투 시작 시 모든 스탯이 8 증가합니다. 턴 종료 시 모든 스탯이 2 감소합니다."},
     skill:{id:"black_feather",cost:2,name:"검은 깃",description:"적 1명에게 기본 공격을 진행한 뒤 모든 스탯이 2 증가합니다."}
   }],
   ["CHR_025","알코","범고래","해","돌격자",7,8,2,3,{
@@ -142,11 +142,11 @@ window.ROCKETMONSTERS = [
   ["CHR_029","오카미","늑대","육","결전자",4,4,4,8,{
     documented:{role:true,stats:true,passive:true,skill:true},
     passive:{id:"full_moon",name:"만월",description:"전투 시작 시 그믐을 얻습니다. 그믐은 턴 시작마다 체력 스탯 +1, 2회 후 반월로 교체됩니다. 반월은 턴 시작마다 방어력 +1, 2회 후 만월로 교체되며 만월 진입 시 공격력 +3을 얻습니다."},
-    skill:{id:"moonlight_moment",cost:3,name:"한 순간의 달빛",description:"적 1명에게 그믐/반월/만월 상태에 따라 공격력 × 2/3/4 피해를 줍니다."}
+    skill:{id:"moonlight_moment",cost:3,name:"한 순간의 달빛",description:"적 1명에게 그믐/반월/만월 상태에 따라 공격력 × 2/2.5/3 피해를 줍니다."}
   }],
   ["CHR_030","울브","갈기늑대","육","암살자",6,6,3,5,{
     documented:{role:true,stats:true,passive:true,skill:true},
-    passive:{id:"prey_found",name:"먹잇감 발견",description:"기본 공격 시 자신이 부여한 피냄새를 가진 적 전원을 공격합니다. 피냄새는 턴 종료 시 최대 HP의 2.5% 피해를 주고 울브의 다음 행동 종료 후 사라집니다."},
+    passive:{id:"prey_found",name:"먹잇감 발견",description:"기본 공격 시 자신이 부여한 피냄새를 가진 적 전원을 공격합니다. 피냄새는 턴 종료 시 출혈과 같은 최대 HP의 5% 피해를 주고 울브의 다음 행동 종료 후 사라집니다."},
     skill:{id:"bite",cost:3,name:"물어뜯기",description:"편성 후방의 적부터 최대 2명에게 기본 공격을 하고 피냄새를 부여합니다."}
   }],
   ["CHR_031","울피","늑대","육","암살자",3,7,3,7,{
@@ -156,19 +156,59 @@ window.ROCKETMONSTERS = [
   }],
   ["CHR_032","카라","까마귀","공","결전자",4,7,2,7,{
     documented:{role:true,stats:true,passive:true,skill:true},
-    passive:{id:"vengeful_blade",name:"복수의 칼날",description:"턴 시작 및 공격받은 뒤 암기를 1 얻습니다. 암기 1당 회피율이 5% 증가하고 공격력이 1 감소합니다."},
-    skill:{id:"memory_barrage",cost:3,name:"암기 난사",description:"적 1명을 암기 수만큼 연속 공격한 뒤 암기를 모두 제거하고 감소했던 공격력을 회복합니다."}
+    passive:{id:"vengeful_blade",name:"복수의 칼날",description:"턴 시작 및 공격받은 뒤 암기를 1 얻습니다. 암기 1당 회피율이 5% 증가합니다."},
+    skill:{id:"memory_barrage",cost:3,name:"암기 난사",description:"적 1명을 암기 수만큼 연속 공격한 뒤 암기를 모두 제거합니다."}
   }],
-  ["CHR_033","카르노가디안","알비노 도마뱀","육","결전자",9,5,9,4,{documented:{role:true}}],
-  ["CHR_034","카이론","사자","육","돌격자",9,8,7,3,{documented:{role:true}}],
-  ["CHR_035","코스모 도리스","갯민숭달팽이","해","교란자",5,6,4,9,{documented:{role:true}}],
-  ["CHR_036","키르유","파리지옥","육","교란자",8,5,6,4,{documented:{role:true}}],
-  ["CHR_037","파르바","꼬마비로드갯민숭달팽이","해","암살자",6,3,4,9],
-  ["CHR_038","피코","공작 · 물총새","공","암살자",3,9,5,9],
-  ["CHR_039","하따","하늘다람쥐","공","교란자",6,9,3,9,{documented:{role:true}}],
-  ["CHR_040","호루스","매","육","보호자",9,4,7,3,{documented:{role:true}}],
-  ["CHR_041","호퍼","펭귄","해","암살자",5,9,5,7,{documented:{role:true}}],
-  ["CHR_042","루나","나비","공","보호자",5,3,4,9,{documented:{role:true}}]
+  ["CHR_033","카르노가디안","알비노 도마뱀","육","결전자",8,3,8,1,{
+    documented:{role:true,stats:true,passive:true,skill:true},
+    passive:{id:"red_gem",name:"붉은 보석",description:"턴 종료 시 공격력과 방어력을 서로 바꿉니다. 방어력이 높으면 보석, 공격력이 높으면 공세 상태입니다."},
+    skill:{id:"all_out_offense",cost:2,name:"총공세",description:"적 1명에게 기본 공격을 합니다. 보석 상태에서는 방어력이 1, 공세 상태에서는 공격력이 1 증가합니다."}
+  }],
+  ["CHR_034","카이론","사자","육","돌격자",7,7,3,3,{
+    documented:{role:true,stats:true,passive:true,skill:true},
+    passive:{id:"tough_hide",name:"질긴 가죽",description:"받는 기본 공격 피해는 0.7배, 스킬 피해는 1.3배가 됩니다."},
+    skill:{id:"beast_slash",cost:0,noGritGain:true,name:"맹수 참격",description:"적 1명에게 공격력 × 1.3 피해를 줍니다. 이 행동으로 투지가 쌓이지 않습니다."}
+  }],
+  ["CHR_035","코스모 도리스","갯민숭달팽이","해","결전자",4,5,4,7,{
+    documented:{role:true,stats:true,passive:true,skill:true},
+    passive:{id:"bullying",name:"쟤가 나 괴롭혀",description:"전투 시작 시 무작위 적에게 괴롭힘을 부여합니다. 코스모 도리스를 공격한 캐릭터에게 괴롭힘이 옮겨가며, 괴롭힘 대상은 받는 피해가 1.3배가 됩니다."},
+    skill:{id:"tell_mom",cost:4,name:"엄마한테 이를거야",description:"괴롭힘을 가진 적을 편성 순서 1번으로 이동시킵니다."}
+  }],
+  ["CHR_036","키르유","파리지옥","육","교란자",9,2,6,3,{
+    documented:{role:true,stats:true,passive:true,skill:true},
+    passive:{id:"love_devour",name:"나도 널 사랑해",description:"전투 시작 시 같은 편성 순서의 적과 함께 각 팀의 1번 자리로 이동하고 대상에게 삼킴 1을 부여합니다. 삼킴 대상은 행동할 수 없고 4중첩에서 즉사합니다. 키르유는 배불러를 얻어 받는 피해가 1.5배가 됩니다."},
+    skill:{id:"bon_appetit",cost:2,name:"그럼 잘 먹겠습니다",description:"자신이 삼킨 적의 삼킴을 1 증가시키고 최대 체력의 5%를 회복합니다."}
+  }],
+  ["CHR_037","파르바","꼬마비로드갯민숭달팽이","해","교란자",7,1,3,9,{
+    documented:{role:true,stats:true,passive:true,skill:true},
+    passive:{id:"mata_hari",name:"마타 하리",description:"공격이 적중하면 대상에게 극독을 1 부여합니다. 극독이 6 이상이면 즉사합니다."},
+    skill:{id:"charlotte_corday",cost:3,name:"샤를로트 코르테",description:"편성 순서가 빠른 적 최대 2명에게 극독을 1 부여합니다."}
+  }],
+  ["CHR_038","피코","공작 · 물총새","공","암살자",1,9,1,9,{
+    documented:{role:true,stats:true,passive:true,skill:true},
+    passive:{id:"jewel_feather",name:"보석 깃털",description:"전투 시작 시 최대 체력의 30%만큼 보호막을 얻습니다."},
+    skill:{id:"diving_attack",cost:3,name:"다이빙 어택",description:"적 1명에게 공격력 × 2 피해를 주고, 실제 HP 피해의 절반만큼 보호막을 얻습니다."}
+  }],
+  ["CHR_039","하따","하늘다람쥐","공","교란자",6,7,2,5,{
+    documented:{role:true,stats:true,passive:true,skill:true},
+    passive:{id:"fall_ready",name:"낙하준비",description:"턴 시작 시 낙하를 1 얻고 체력·공격력·방어력·속도 중 하나가 무작위로 1 증가합니다."},
+    skill:{id:"squirrel_thunder",cost:6,name:"람쥐썬더",description:"낙하 수만큼 적 1명에게 기본 공격을 반복하고, 모든 스탯이 낙하 × 2만큼 감소합니다."}
+  }],
+  ["CHR_040","호루스","매","육","결전자",8,2,7,3,{
+    documented:{role:true,stats:true,passive:true,skill:true},
+    passive:{id:"aloof_knowledge",name:"고고함",description:"턴 시작, 다른 아군의 피격, 다른 아군의 전투불능마다 지식을 1 얻습니다. 지식이 29 이하이면 행동하지 않습니다."},
+    skill:{id:"last_command",cost:8,name:"최후의 호령",description:"자신과 생존한 적 전체를 대상으로 지식 ÷ 2회 기본 공격을 반복합니다."}
+  }],
+  ["CHR_041","호퍼","펭귄","해","암살자",5,6,3,6,{
+    documented:{role:true,stats:true,passive:true,skill:true},
+    passive:{id:"steel_wing",name:"강철날개",description:"전투불능이 되는 피해를 전투당 1회 HP 1로 견딥니다. 기본 공격을 2회 진행합니다."},
+    skill:{id:"blue_blade",cost:4,priority:2,name:"푸른칼날",description:"우선도 +2. 적 1명을 2회 공격하고, 적중할 때마다 대상의 방어력을 1 감소시킵니다."}
+  }],
+  ["CHR_042","루나","나비","공","보호자",5,2,7,6,{
+    documented:{role:true,stats:true,passive:true,skill:true},
+    passive:{id:"healing_power",name:"치유의 힘",description:"턴 시작 시 현재 HP 비율이 가장 낮은 생존 아군을 최대 체력의 10%만큼 회복합니다."},
+    skill:{id:"silent_wing",cost:4,name:"침묵의 날개",description:"생존한 적 전체에게 침묵을 부여해 다음 행동에서 스킬을 사용할 수 없게 합니다."}
+  }]
 ].map(([id,name,species,type,sourceRole,hp,atk,def,spd,meta = {}]) => ({
   id,
   name,

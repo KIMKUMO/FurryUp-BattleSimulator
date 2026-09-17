@@ -200,7 +200,11 @@ function statusLabels(unit) {
   if (unit.statuses?.current) labels.push("물살");
   if (unit.statuses?.paralysis) labels.push("마비");
   if (unit.statuses?.binding) labels.push(`속박 ${unit.statuses.binding.count}`);
-  if (unit.statuses?.bloodScent) labels.push("피냄새 2.5%");
+  if (unit.statuses?.bloodScent) labels.push("피냄새 5%");
+  if (unit.statuses?.bullying) labels.push("괴롭힘·받는 피해 +30%");
+  if (unit.statuses?.swallowed) labels.push(`삼킴 ${unit.statuses.swallowed.count}`);
+  if (unit.statuses?.deadlyPoison) labels.push(`극독 ${unit.statuses.deadlyPoison.count}`);
+  if (unit.statuses?.silenceActions > 0) labels.push("침묵");
   if (unit.statuses?.silk) labels.push("비단");
   if (unit.statuses?.stunActions > 0) labels.push("기절");
   if (unit.charge > 0) labels.push(`차지 ${unit.charge}`);
@@ -209,6 +213,9 @@ function statusLabels(unit) {
   if (unit.selfHarm > 0) labels.push(`자해 ${unit.selfHarm}`);
   if (unit.wild > 0) labels.push(`야성 ${unit.wild}`);
   if (unit.memory > 0) labels.push(`암기 ${unit.memory}`);
+  if (unit.fall > 0) labels.push(`낙하 ${unit.fall}`);
+  if (unit.knowledge > 0) labels.push(`지식 ${unit.knowledge}`);
+  if (unit.glutted) labels.push("배불러·받는 피해 +50%");
   if (unit.lunarPhase) labels.push({ crescent: "그믐", half: "반월", full: "만월" }[unit.lunarPhase]);
   if (unit.sureHit) labels.push("필중");
   if (unit.howlBuff > 0) labels.push("공격 +2");
@@ -377,6 +384,10 @@ function beginBattle() {
       selfHarm: 0,
       wild: 0,
       memory: 0,
+      fall: 0,
+      knowledge: 0,
+      glutted: false,
+      enduredKnockout: false,
       lunarPhase: null,
       lunarCount: 0,
       sureHit: false,
@@ -444,6 +455,28 @@ function beginBattle() {
         pushLog({ kind: "passive", label: "STAGE", message: `${unit.name}의 보듬는 물결 · ${target.name}에게 비단 부여` });
       }
     }
+    if (passiveId === "jewel_feather") {
+      const gained = addShield(unit, Math.floor(unit.maxHp * 0.3));
+      unit.shieldingDone += gained;
+      pushLog({ kind: "passive", label: "STAGE", message: `${unit.name}의 보석 깃털 · 보호막 +${gained}` });
+    }
+    if (passiveId === "bullying") {
+      const candidates = aliveUnits(enemySide(unit.side));
+      const target = candidates[Math.floor(battle.rng() * candidates.length)];
+      if (target && applyHarmfulStatus(target, "bullying", { sourceUid: unit.uid })) {
+        pushLog({ kind: "passive", label: "STAGE", message: `${unit.name}의 쟤가 나 괴롭혀 · ${target.name}에게 괴롭힘 부여` });
+      }
+    }
+  }
+  for (const unit of units.filter(item => item.alive && passiveEffect(item).id === "love_devour")) {
+    const target = units.find(item => item.side !== unit.side && item.alive && item.slot === unit.slot);
+    if (!target) continue;
+    moveToFront(unit);
+    moveToFront(target);
+    if (applyHarmfulStatus(target, "swallowed", { sourceUid: unit.uid, count: 1 })) {
+      unit.glutted = true;
+      pushLog({ kind: "passive", label: "STAGE", message: `${unit.name}의 나도 널 사랑해 · ${target.name} 삼킴 1 · 양 팀 1번 위치 이동` });
+    }
   }
   for (const unit of units.filter(item => item.alive && passiveEffect(item).id === "seeping_current")) {
     const target = aliveUnits(enemySide(unit.side)).sort((left, right) => right.slot - left.slot)[0];
@@ -501,7 +534,7 @@ function startTurn() {
     }
     if (passiveId === "vengeful_blade") {
       gainMemory(unit, 1);
-      pushLog({ kind: "passive", label: `T${String(battle.turn).padStart(2, "0")}`, message: `${unit.name}의 복수의 칼날 · 암기 ${unit.memory} · 공격력 -1` });
+      pushLog({ kind: "passive", label: `T${String(battle.turn).padStart(2, "0")}`, message: `${unit.name}의 복수의 칼날 · 암기 ${unit.memory}` });
     }
     if (passiveId === "full_moon") {
       if (unit.lunarPhase === "crescent") {
@@ -527,6 +560,23 @@ function startTurn() {
       const before = unit.grit;
       unit.grit = Math.max(0, unit.grit - 1);
       pushLog({ kind: "status", label: `T${String(battle.turn).padStart(2, "0")}`, message: `${unit.name}의 물살 · 투지 ${before}→${unit.grit}` });
+    }
+    if (passiveId === "fall_ready") {
+      unit.fall += 1;
+      const stat = ["hp", "attack", "defense", "speed"][Math.floor(battle.rng() * 4)];
+      if (stat === "hp") adjustHp(unit, settings.hpMultiplier);
+      else unit[stat] += 1;
+      const name = { hp: "체력", attack: "공격력", defense: "방어력", speed: "속도" }[stat];
+      pushLog({ kind: "passive", label: `T${String(battle.turn).padStart(2, "0")}`, message: `${unit.name}의 낙하준비 · 낙하 ${unit.fall} · ${name} +1` });
+    }
+    if (passiveId === "aloof_knowledge") {
+      unit.knowledge += 1;
+      pushLog({ kind: "passive", label: `T${String(battle.turn).padStart(2, "0")}`, message: `${unit.name}의 고고함 · 지식 ${unit.knowledge}` });
+    }
+    if (passiveId === "healing_power") {
+      const target = lowestHpAlly(unit.side);
+      const result = healUnit(unit, target, Math.floor(target.maxHp * 0.1));
+      if (result.healed || result.shield) pushLog({ kind: "passive", label: `T${String(battle.turn).padStart(2, "0")}`, message: `${unit.name}의 치유의 힘 · ${target.name} ${result.healed ? `HP +${result.healed}` : `보호막 +${result.shield}`}` });
     }
   }
 
@@ -595,11 +645,15 @@ function checkWinner() {
 
 function canUseSkill(actor) {
   const skillId = skillEffect(actor).id;
+  if (!battle) return true;
   const enemies = aliveUnits(enemySide(actor.side));
   if (!enemies.length) return false;
+  if (Number(actor.statuses.silenceActions || 0) > 0) return false;
   if (skillId === "cut_throat") return enemies.some(unit => unit.statuses.mark?.sourceUid === actor.uid);
   if (skillId === "bind") return enemies.some(unit => unit.statuses.current);
   if (skillId === "feast_time") return actor.fullness > 0;
+  if (skillId === "tell_mom") return enemies.some(unit => unit.statuses.bullying?.sourceUid === actor.uid);
+  if (skillId === "bon_appetit") return enemies.some(unit => unit.statuses.swallowed?.sourceUid === actor.uid);
   return true;
 }
 
@@ -661,14 +715,12 @@ function adjustAllStats(unit, amount, { hpFloorAtTen = false } = {}) {
 function gainMemory(unit, amount = 1) {
   const gained = Math.max(0, Math.trunc(Number(amount) || 0));
   unit.memory += gained;
-  unit.attack -= gained;
   return gained;
 }
 
 function clearMemory(unit) {
   const removed = Math.max(0, Number(unit.memory || 0));
   unit.memory = 0;
-  unit.attack += removed;
   return removed;
 }
 
@@ -768,6 +820,27 @@ function applyHarmfulStatus(target, type, payload = {}) {
     };
     return true;
   }
+  if (type === "bullying") {
+    for (const unit of battle.units) {
+      if (unit.statuses.bullying?.sourceUid === payload.sourceUid) delete unit.statuses.bullying;
+    }
+    target.statuses.bullying = { sourceUid: payload.sourceUid };
+    return true;
+  }
+  if (type === "swallowed") {
+    if (!target.statuses.swallowed) target.statuses.swallowed = { sourceUid: payload.sourceUid, count: 0 };
+    target.statuses.swallowed.count += Math.max(1, Number(payload.count || 1));
+    return true;
+  }
+  if (type === "deadlyPoison") {
+    if (!target.statuses.deadlyPoison) target.statuses.deadlyPoison = { sourceUid: payload.sourceUid, count: 0 };
+    target.statuses.deadlyPoison.count += Math.max(1, Number(payload.count || 1));
+    return true;
+  }
+  if (type === "silence") {
+    target.statuses.silenceActions = Math.max(Number(target.statuses.silenceActions || 0), Number(payload.actions || 1));
+    return true;
+  }
   return false;
 }
 
@@ -783,17 +856,26 @@ function applyDamage(target, rawDamage, { bypassShield = false } = {}) {
   const hpLoss = Math.max(0, normalized - shieldAbsorb);
   const hpBefore = target.currentHp;
   target.currentHp = Math.max(0, target.currentHp - hpLoss);
+  let endured = false;
+  if (target.currentHp <= 0 && passiveEffect(target).id === "steel_wing" && !target.enduredKnockout) {
+    target.currentHp = 1;
+    target.enduredKnockout = true;
+    endured = true;
+  }
   const hpDamage = hpBefore - target.currentHp;
   if (target.currentHp <= 0) target.alive = false;
-  return { rawDamage: normalized, attemptedDamage: normalized, shieldAbsorb, hpDamage, hpBefore, hpAfter: target.currentHp, knockout: wasAlive && !target.alive, nullified: false };
+  return { rawDamage: normalized, attemptedDamage: normalized, shieldAbsorb, hpDamage, hpBefore, hpAfter: target.currentHp, knockout: wasAlive && !target.alive, nullified: false, endured };
 }
 
-function damageWithPassives(actor, target, rawDamage) {
+function damageWithPassives(actor, target, rawDamage, attackKind = "basic") {
   let adjusted = Math.max(0, Number(rawDamage) || 0);
   if (passiveEffect(actor).id === "blood_excitement" && actor.type === target.type) adjusted *= 1.2;
   if (passiveEffect(actor).id === "swift_pressure" && effectiveSpeed(actor) > effectiveSpeed(target)) adjusted *= 1.3;
   if (passiveEffect(actor).id === "poison_spray" && target.statuses.poison) adjusted *= 1.5;
   if (target.statuses.mark?.sourceUid === actor.uid) adjusted *= 1.2;
+  if (target.statuses.bullying) adjusted *= 1.3;
+  if (target.glutted) adjusted *= 1.5;
+  if (passiveEffect(target).id === "tough_hide") adjusted *= attackKind === "skill" ? 1.3 : 0.7;
   return Math.floor(adjusted);
 }
 
@@ -802,6 +884,10 @@ function onKnockout(source, target) {
     unit.attack += 1;
     unit.speed += 1;
     pushLog({ kind: "passive", label: "KO", message: `${unit.name}의 원시의 포식 · 공격력 +1 · 속도 +1` });
+  }
+  for (const unit of battle.units.filter(item => item.alive && item.side === target.side && passiveEffect(item).id === "aloof_knowledge")) {
+    unit.knowledge += 1;
+    pushLog({ kind: "passive", label: "KO", message: `${unit.name}의 고고함 · 아군 전투불능으로 지식 ${unit.knowledge}` });
   }
   for (const unit of battle.units) {
     if (unit.statuses.bloodScent?.sourceUid === target.uid) delete unit.statuses.bloodScent;
@@ -824,7 +910,7 @@ function onKnockout(source, target) {
   }
 }
 
-function resolveHit(actor, target, rawDamage, { allowDodge = true } = {}) {
+function resolveHit(actor, target, rawDamage, { allowDodge = true, attackKind = "basic" } = {}) {
   let dodgeRoll = null;
   let dodged = false;
   const chance = actor.sureHit ? 0 : dodgeChance(target);
@@ -837,17 +923,23 @@ function resolveHit(actor, target, rawDamage, { allowDodge = true } = {}) {
     const paralysisRoll = battle.rng();
     if (paralysisRoll < 0.5) applyHarmfulStatus(actor, "paralysis", { sourceUid: target.uid });
   }
+  if (passiveEffect(target).id === "bullying" && actor.alive) applyHarmfulStatus(actor, "bullying", { sourceUid: target.uid });
   if (target.alive && passiveEffect(target).id === "vengeful_blade") gainMemory(target, 1);
   if (dodged) {
     return { target, dodged: true, dodgeRoll, dodgeChance: chance, rawDamage: 0, shieldAbsorb: 0, hpDamage: 0, hpBefore: target.currentHp, hpAfter: target.currentHp, knockout: false, nullified: false };
   }
-  const adjusted = damageWithPassives(actor, target, rawDamage);
+  const adjusted = damageWithPassives(actor, target, rawDamage, attackKind);
   const result = applyDamage(target, adjusted);
   actor.damageDealt += result.hpDamage;
   actor.directDamage += result.hpDamage;
   if (passiveEffect(target).id === "charge_on_hit") target.charge += 1;
   if (passiveEffect(target).id === "amplified_armor") target.attack += 2;
   if (passiveEffect(target).id === "swarm_body" && target.swarm > 0) target.swarm -= 1;
+  if (passiveEffect(actor).id === "mata_hari" && target.alive) {
+    applyHarmfulStatus(target, "deadlyPoison", { sourceUid: actor.uid, count: 1 });
+    if (target.statuses.deadlyPoison.count >= 6) return executeUnit(actor, target);
+  }
+  for (const unit of battle.units.filter(item => item.alive && item.side === target.side && passiveEffect(item).id === "aloof_knowledge")) unit.knowledge += 1;
   if (result.knockout) onKnockout(actor, target);
   return { target, dodged: false, dodgeRoll, dodgeChance: chance, ...result };
 }
@@ -856,6 +948,7 @@ function hitText(hit) {
   if (hit.dodged) return `${hit.target.name} 회피 ${hit.dodgeChance}%(${hit.dodgeRoll.toFixed(3)})`;
   if (hit.nullified) return `${hit.target.name} 첫 피해 무효`;
   if (hit.executed) return `${hit.target.name} 처형·전투불능`;
+  if (hit.endured) return `${hit.target.name} ${hit.hpBefore}→1·강철날개 생존`;
   const shield = hit.shieldAbsorb ? `·보호막 ${hit.shieldAbsorb}` : "";
   const knockout = hit.knockout ? "·전투불능" : "";
   return `${hit.target.name} ${hit.hpBefore}→${hit.hpAfter}${shield}${knockout}`;
@@ -890,8 +983,13 @@ function executeBasicAttack(actor) {
     : [];
   const targets = scented.length ? scented : [selectTarget(actor)].filter(Boolean);
   if (!targets.length) return { hits: [], notes: ["공격할 대상 없음"] };
-  const hits = targets.map(target => resolveHit(actor, target, basicDamageFor(actor, target)));
+  const hits = [];
+  const repeat = passiveEffect(actor).id === "steel_wing" && !scented.length ? 2 : 1;
+  for (const target of targets) {
+    for (let count = 0; count < repeat && target.alive; count += 1) hits.push(resolveHit(actor, target, basicDamageFor(actor, target)));
+  }
   const notes = [];
+  if (repeat > 1) notes.push("강철날개 · 기본 공격 2회");
   if (scented.length) notes.push(`피냄새 대상 ${scented.length}명 공격`);
   for (const hit of hits) {
     const target = hit.target;
@@ -912,7 +1010,7 @@ function executeSkill(actor, skill) {
   const speed = effectiveSpeed(actor);
   const hitOne = (target, damage) => {
     if (!target) return null;
-    const hit = resolveHit(actor, target, damage);
+    const hit = resolveHit(actor, target, damage, { attackKind: "skill" });
     hits.push(hit);
     return hit;
   };
@@ -927,7 +1025,7 @@ function executeSkill(actor, skill) {
       break;
     }
     case "weak_predation": {
-      const hit = hitOne(selectTarget(actor, skill.id), attack * 3);
+      const hit = hitOne(selectTarget(actor, skill.id), attack * 2);
       if (hit && !hit.dodged) {
         const result = healUnit(actor, actor, Math.floor(hit.hpDamage * 0.3));
         if (result.healed || result.shield) notes.push(`흡수 ${result.healed ? `HP +${result.healed}` : `보호막 +${result.shield}`}`);
@@ -970,7 +1068,7 @@ function executeSkill(actor, skill) {
       break;
     }
     case "smash":
-      hitOne(selectTarget(actor, skill.id), attack * 3);
+      hitOne(selectTarget(actor, skill.id), attack * 2);
       break;
     case "sea_wave":
       for (const target of allies.filter(unit => unit.type === "해")) {
@@ -1135,7 +1233,7 @@ function executeSkill(actor, skill) {
       }
       break;
     case "moonlight_moment": {
-      const multiplier = { crescent: 2, half: 3, full: 4 }[actor.lunarPhase] || 1;
+      const multiplier = { crescent: 2, half: 2.5, full: 3 }[actor.lunarPhase] || 1;
       hitOne(selectTarget(actor, skill.id), attack * multiplier);
       notes.push(`${{ crescent: "그믐", half: "반월", full: "만월" }[actor.lunarPhase] || "무상태"} · 공격력 ×${multiplier}`);
       break;
@@ -1167,9 +1265,94 @@ function executeSkill(actor, skill) {
       const repeat = Math.max(0, actor.memory);
       for (let count = 0; count < repeat && target?.alive; count += 1) hitOne(target, basicDamageFor(actor, target));
       const removed = clearMemory(actor);
-      notes.push(`암기 ${repeat} 기준 ${hits.length}회 공격 · 암기 ${removed} 제거 · 공격력 +${removed}`);
+      notes.push(`암기 ${repeat} 기준 ${hits.length}회 공격 · 암기 ${removed} 제거`);
       break;
     }
+    case "all_out_offense": {
+      const target = selectTarget(actor, skill.id);
+      const gemState = actor.defense > actor.attack;
+      hitOne(target, basicDamageFor(actor, target));
+      if (gemState) actor.defense += 1;
+      else actor.attack += 1;
+      notes.push(gemState ? "보석 상태 · 방어력 +1" : "공세 상태 · 공격력 +1");
+      break;
+    }
+    case "beast_slash":
+      hitOne(selectTarget(actor, skill.id), attack * 1.3);
+      break;
+    case "tell_mom": {
+      const target = enemies.find(unit => unit.statuses.bullying?.sourceUid === actor.uid);
+      if (target && moveToFront(target)) notes.push(`${target.name}을(를) 1번 위치로 이동`);
+      else notes.push(target ? `${target.name}은(는) 이미 1번 위치` : "괴롭힘 대상 없음");
+      break;
+    }
+    case "bon_appetit": {
+      const target = enemies.find(unit => unit.statuses.swallowed?.sourceUid === actor.uid);
+      if (target) {
+        applyHarmfulStatus(target, "swallowed", { sourceUid: actor.uid, count: 1 });
+        notes.push(`${target.name} 삼킴 ${target.statuses.swallowed.count}`);
+        if (target.statuses.swallowed.count >= 4) {
+          const execution = executeUnit(actor, target);
+          if (execution) hits.push(execution);
+          notes.push(`${target.name} 삼킴 4 · 처형`);
+        }
+      }
+      const result = healUnit(actor, actor, Math.floor(actor.maxHp * 0.05));
+      if (result.healed || result.shield) notes.push(result.healed ? `HP +${result.healed}` : `보호막 +${result.shield}`);
+      break;
+    }
+    case "charlotte_corday":
+      for (const target of enemies.slice(0, 2)) {
+        if (!applyHarmfulStatus(target, "deadlyPoison", { sourceUid: actor.uid, count: 1 })) notes.push(`${target.name} 극독 면역`);
+        else {
+          notes.push(`${target.name} 극독 ${target.statuses.deadlyPoison.count}`);
+          if (target.statuses.deadlyPoison.count >= 6) {
+            const execution = executeUnit(actor, target);
+            if (execution) hits.push(execution);
+          }
+        }
+      }
+      break;
+    case "diving_attack": {
+      const hit = hitOne(selectTarget(actor, skill.id), attack * 2);
+      if (hit && !hit.dodged) {
+        const gained = addShield(actor, Math.floor(hit.hpDamage * 0.5));
+        actor.shieldingDone += gained;
+        notes.push(`보호막 +${gained}`);
+      }
+      break;
+    }
+    case "squirrel_thunder": {
+      const target = selectTarget(actor, skill.id);
+      const repeat = Math.max(0, actor.fall);
+      for (let count = 0; count < repeat && target?.alive; count += 1) hitOne(target, basicDamageFor(actor, target));
+      adjustAllStats(actor, -(repeat * 2));
+      notes.push(`낙하 ${repeat} · ${hits.length}회 공격 · 모든 스탯 -${repeat * 2}`);
+      break;
+    }
+    case "last_command": {
+      const repeat = Math.max(0, Math.floor(actor.knowledge / 2));
+      for (let count = 0; count < repeat && actor.alive; count += 1) {
+        hitOne(actor, basicDamageFor(actor, actor));
+        for (const target of aliveUnits(enemySide(actor.side)).sort((left, right) => left.slot - right.slot)) hitOne(target, basicDamageFor(actor, target));
+      }
+      notes.push(`지식 ${actor.knowledge} · 자신과 적 전체 ${repeat}회 공격`);
+      break;
+    }
+    case "blue_blade": {
+      const target = selectTarget(actor, skill.id);
+      for (let count = 0; count < 2 && target?.alive; count += 1) {
+        const hit = hitOne(target, basicDamageFor(actor, target));
+        if (hit && !hit.dodged && target.alive) {
+          target.defense -= 1;
+          notes.push(`${target.name} 방어력 -1`);
+        }
+      }
+      break;
+    }
+    case "silent_wing":
+      for (const target of enemies) notes.push(applyHarmfulStatus(target, "silence", { sourceUid: actor.uid, actions: 1 }) ? `${target.name} 침묵` : `${target.name} 침묵 면역`);
+      break;
     default:
       hitOne(selectTarget(actor, skill.id), settings.skillDamage);
       break;
@@ -1206,20 +1389,19 @@ function finishTurn() {
       if (result.knockout) onKnockout(source, unit);
     }
     if (unit.alive && unit.selfHarm > 0) {
-      const percent = unit.selfHarm;
-      const result = applyDamage(unit, Math.floor(unit.maxHp * percent / 100), { bypassShield: true });
-      statusMessages.push(`${unit.name} 자해 ${unit.selfHarm}×1% · HP ${result.hpBefore}→${result.hpAfter}${result.nullified ? " · 피해 무효" : ""}`);
+      const result = applyDamage(unit, Math.floor(unit.maxHp * unit.selfHarm * 0.025), { bypassShield: true });
+      statusMessages.push(`${unit.name} 자해 ${unit.selfHarm}×2.5% · HP ${result.hpBefore}→${result.hpAfter}${result.nullified ? " · 피해 무효" : ""}`);
       if (result.knockout) onKnockout(null, unit);
     }
     if (unit.alive && unit.statuses.bloodScent) {
       const status = unit.statuses.bloodScent;
       const source = battle.units.find(item => item.uid === status.sourceUid) || null;
-      const result = applyDamage(unit, Math.floor(unit.maxHp * 0.025), { bypassShield: true });
+      const result = applyDamage(unit, Math.floor(unit.maxHp * 0.05), { bypassShield: true });
       if (source) {
         source.damageDealt += result.hpDamage;
         source.statusDamage += result.hpDamage;
       }
-      statusMessages.push(`${unit.name} 피냄새 2.5% · HP ${result.hpBefore}→${result.hpAfter}${result.nullified ? " · 피해 무효" : ""}`);
+      statusMessages.push(`${unit.name} 피냄새 5% · HP ${result.hpBefore}→${result.hpAfter}${result.nullified ? " · 피해 무효" : ""}`);
       if (result.knockout) onKnockout(source, unit);
     }
   }
@@ -1227,7 +1409,7 @@ function finishTurn() {
   if (checkWinner()) return;
 
   for (const unit of battle.units.filter(item => item.alive && passiveEffect(item).id === "limited_time")) {
-    adjustAllStats(unit, -2, { hpFloorAtTen: true });
+    adjustAllStats(unit, -2);
     pushLog({ kind: "passive", label, message: `${unit.name}의 한정된 시간 · 모든 스탯 -2 · HP ${unit.currentHp}/${unit.maxHp} · 공격 ${unit.attack} · 방어 ${unit.defense} · 속도 ${unit.speed}` });
   }
 
@@ -1238,6 +1420,10 @@ function finishTurn() {
       if (result.healed || result.shield) healed.push(`${target.name} ${result.healed ? `HP +${result.healed}` : `보호막 +${result.shield}`}`);
     }
     if (healed.length) pushLog({ kind: "passive", label, message: `${source.name}의 생명친화 · ${healed.join(" / ")}` });
+  }
+  for (const unit of battle.units.filter(item => item.alive && passiveEffect(item).id === "red_gem")) {
+    [unit.attack, unit.defense] = [unit.defense, unit.attack];
+    pushLog({ kind: "passive", label, message: `${unit.name}의 붉은 보석 · 공격력과 방어력 교환 (공격 ${unit.attack} · 방어 ${unit.defense})` });
   }
   pushLog({ kind: "system", label, message: `${battle.turn}턴 종료` });
 }
@@ -1281,6 +1467,16 @@ function advanceOneAction({ render = true } = {}) {
   battle.actionInTurn += 1;
   actor.actionsTaken += 1;
   const label = `T${battle.turn}.${String(battle.actionInTurn).padStart(2, "0")}`;
+  if (actor.statuses.swallowed) {
+    pushLog({ kind: "status", side: actor.side, action: "swallowed", label, message: `${actor.name}은(는) 삼킴 ${actor.statuses.swallowed.count} 상태로 행동할 수 없습니다.` });
+    if (render) renderAll();
+    return true;
+  }
+  if (passiveEffect(actor).id === "aloof_knowledge" && actor.knowledge <= 29) {
+    pushLog({ kind: "passive", side: actor.side, action: "knowledge", label, message: `${actor.name}의 지식 ${actor.knowledge} · 29 이하라 행동하지 않습니다.` });
+    if (render) renderAll();
+    return true;
+  }
   if (actor.statuses.stunActions > 0) {
     actor.statuses.stunActions -= 1;
     const notes = [];
@@ -1292,7 +1488,9 @@ function advanceOneAction({ render = true } = {}) {
 
   const gritBefore = actor.grit;
   const skill = skillEffect(actor);
-  const usesSkill = skillReady(actor);
+  const silenced = Number(actor.statuses.silenceActions || 0) > 0;
+  const usesSkill = !silenced && skillReady(actor);
+  if (silenced) actor.statuses.silenceActions -= 1;
   if (usesSkill) {
     actor.grit -= skillCostFor(actor);
     actor.skillUses += 1;
@@ -1304,7 +1502,7 @@ function advanceOneAction({ render = true } = {}) {
   const totalHpDamage = outcome.hits.reduce((sum, hit) => sum + hit.hpDamage, 0);
   outcome.notes.push(...afterDirectDamage(actor, totalHpDamage));
   expireBloodScentAfterAction(actor, outcome.notes);
-  actor.grit += settings.gritGain;
+  if (!(usesSkill && skill.noGritGain)) actor.grit += settings.gritGain;
   battle.lastTargetUid = outcome.hits[0]?.target.uid || null;
 
   const actionName = usesSkill ? skill.name : "기본 공격";
