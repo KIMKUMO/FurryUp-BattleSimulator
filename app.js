@@ -86,7 +86,18 @@ function effectiveAttack(unit) {
 }
 
 function effectiveSpeed(unit) {
-  return unit.speed + shieldStatBonus(unit);
+  let speed = unit.speed + shieldStatBonus(unit);
+  if (passiveEffect(unit).id === "web" && battle && aliveUnits(enemySide(unit.side)).some(enemy => enemy.statuses.paralysis)) speed *= 2;
+  if (unit.statuses?.paralysis) speed = Math.floor(speed / 2);
+  return speed;
+}
+
+function dodgeChance(unit) {
+  let chance = unit.mechanicRole === "교란자" ? settings.dodgeRate : 0;
+  chance += Math.max(0, Number(unit.swarm || 0)) * 10;
+  chance += Math.min(50, Math.max(0, Number(unit.wild || 0)) * 5);
+  chance += Math.max(0, Number(unit.memory || 0)) * 5;
+  return clamp(chance, 0, 100);
 }
 
 function effectivePriority(unit) {
@@ -131,6 +142,11 @@ function previewUnit(member, side, slot) {
     statuses: {},
     charge: 0,
     fullness: 0,
+    swarm: 0,
+    selfHarm: 0,
+    wild: 0,
+    memory: 0,
+    lunarPhase: null,
     alive: true,
     attack: member.atk,
     defense: member.def,
@@ -182,9 +198,19 @@ function statusLabels(unit) {
   if (unit.statuses?.bleed) labels.push("출혈 5%");
   if (unit.statuses?.mark) labels.push("표식");
   if (unit.statuses?.current) labels.push("물살");
+  if (unit.statuses?.paralysis) labels.push("마비");
+  if (unit.statuses?.binding) labels.push(`속박 ${unit.statuses.binding.count}`);
+  if (unit.statuses?.bloodScent) labels.push("피냄새 2.5%");
+  if (unit.statuses?.silk) labels.push("비단");
   if (unit.statuses?.stunActions > 0) labels.push("기절");
   if (unit.charge > 0) labels.push(`차지 ${unit.charge}`);
   if (unit.fullness > 0) labels.push(`배부름 ${unit.fullness}`);
+  if (unit.swarm > 0) labels.push(`군체 ${unit.swarm}`);
+  if (unit.selfHarm > 0) labels.push(`자해 ${unit.selfHarm}`);
+  if (unit.wild > 0) labels.push(`야성 ${unit.wild}`);
+  if (unit.memory > 0) labels.push(`암기 ${unit.memory}`);
+  if (unit.lunarPhase) labels.push({ crescent: "그믐", half: "반월", full: "만월" }[unit.lunarPhase]);
+  if (unit.sureHit) labels.push("필중");
   if (unit.howlBuff > 0) labels.push("공격 +2");
   return labels;
 }
@@ -347,6 +373,15 @@ function beginBattle() {
       statuses: {},
       charge: 0,
       fullness: 0,
+      swarm: 0,
+      selfHarm: 0,
+      wild: 0,
+      memory: 0,
+      lunarPhase: null,
+      lunarCount: 0,
+      sureHit: false,
+      firstDamageBlocked: false,
+      actionsTaken: 0,
       howlBuff: 0,
       alive: true,
       priority: member.priority,
@@ -383,6 +418,33 @@ function beginBattle() {
     const gained = addShield(unit, Math.floor(unit.maxHp * 0.1));
     pushLog({ kind: "system", label: "STAGE", message: `${unit.name}이(가) 역할군 효과로 보호막 ${gained}을 얻었습니다.` });
   }
+  for (const unit of units.filter(item => item.alive)) {
+    const passiveId = passiveEffect(unit).id;
+    if (passiveId === "swarm_body") {
+      unit.swarm = 3;
+      pushLog({ kind: "passive", label: "STAGE", message: `${unit.name}의 흩어지는 신체 · 군체 3` });
+    }
+    if (passiveId === "limited_time") {
+      adjustAllStats(unit, 8);
+      pushLog({ kind: "passive", label: "STAGE", message: `${unit.name}의 한정된 시간 · 모든 스탯 +8 (HP ${unit.currentHp}/${unit.maxHp})` });
+    }
+    if (passiveId === "deadeye") {
+      unit.sureHit = true;
+      pushLog({ kind: "passive", label: "STAGE", message: `${unit.name}의 대해적 · 필중 획득` });
+    }
+    if (passiveId === "full_moon") {
+      unit.lunarPhase = "crescent";
+      unit.lunarCount = 0;
+      pushLog({ kind: "passive", label: "STAGE", message: `${unit.name}의 만월 · 그믐 획득` });
+    }
+    if (passiveId === "embracing_wave") {
+      const target = units.filter(item => item.side === unit.side && item.alive).sort((left, right) => left.slot - right.slot)[0];
+      if (target) {
+        target.statuses.silk = { sourceUid: unit.uid };
+        pushLog({ kind: "passive", label: "STAGE", message: `${unit.name}의 보듬는 물결 · ${target.name}에게 비단 부여` });
+      }
+    }
+  }
   for (const unit of units.filter(item => item.alive && passiveEffect(item).id === "seeping_current")) {
     const target = aliveUnits(enemySide(unit.side)).sort((left, right) => right.slot - left.slot)[0];
     if (!target) continue;
@@ -418,6 +480,11 @@ function startTurn() {
 
   for (const unit of battle.units.filter(item => item.alive)) {
     const passiveId = passiveEffect(unit).id;
+    if (unit.statuses.silk) {
+      const source = battle.units.find(item => item.uid === unit.statuses.silk.sourceUid) || null;
+      const result = healUnit(source, unit, Math.floor(unit.maxHp * 0.05));
+      if (result.healed || result.shield) pushLog({ kind: "passive", label: `T${String(battle.turn).padStart(2, "0")}`, message: `${unit.name}의 비단 · ${result.healed ? `HP +${result.healed}` : `보호막 +${result.shield}`}` });
+    }
     if (passiveId === "shell_break" && battle.turn % 3 === 0) {
       unit.defense -= 1;
       unit.attack += 2;
@@ -426,6 +493,35 @@ function startTurn() {
     if (passiveId === "kings_leap") {
       unit.speed += 1;
       pushLog({ kind: "passive", label: `T${String(battle.turn).padStart(2, "0")}`, message: `${unit.name}의 왕의 도약 · 속도 +1` });
+    }
+    if (passiveId === "wild_spirit") {
+      unit.wild += 1;
+      unit.speed += 1;
+      pushLog({ kind: "passive", label: `T${String(battle.turn).padStart(2, "0")}`, message: `${unit.name}의 불굴의 투지 · 야성 ${unit.wild} · 속도 +1 · 회피 +${Math.min(50, unit.wild * 5)}%` });
+    }
+    if (passiveId === "vengeful_blade") {
+      gainMemory(unit, 1);
+      pushLog({ kind: "passive", label: `T${String(battle.turn).padStart(2, "0")}`, message: `${unit.name}의 복수의 칼날 · 암기 ${unit.memory} · 공격력 -1` });
+    }
+    if (passiveId === "full_moon") {
+      if (unit.lunarPhase === "crescent") {
+        adjustHp(unit, 10);
+        unit.lunarCount += 1;
+        if (unit.lunarCount >= 2) {
+          unit.lunarPhase = "half";
+          unit.lunarCount = 0;
+        }
+        pushLog({ kind: "passive", label: `T${String(battle.turn).padStart(2, "0")}`, message: `${unit.name}의 그믐 · 체력 스탯 +1 · 현재 ${unit.lunarPhase === "half" ? "반월" : "그믐"}` });
+      } else if (unit.lunarPhase === "half") {
+        unit.defense += 1;
+        unit.lunarCount += 1;
+        if (unit.lunarCount >= 2) {
+          unit.lunarPhase = "full";
+          unit.lunarCount = 0;
+          unit.attack += 3;
+        }
+        pushLog({ kind: "passive", label: `T${String(battle.turn).padStart(2, "0")}`, message: `${unit.name}의 반월 · 방어력 +1${unit.lunarPhase === "full" ? " · 만월 진입 공격력 +3" : ""}` });
+      }
     }
     if (unit.statuses.current && battle.turn % 3 === 0) {
       const before = unit.grit;
@@ -532,6 +628,89 @@ function addShield(target, amount) {
   return gained;
 }
 
+function adjustHp(unit, amount, { floorAtTen = false } = {}) {
+  const delta = Math.trunc(Number(amount) || 0);
+  if (!delta) return 0;
+  if (delta > 0) {
+    unit.maxHp += delta;
+    unit.currentHp += delta;
+    return delta;
+  }
+  const minimum = floorAtTen ? 10 : 1;
+  const decrease = Math.min(-delta, Math.max(0, unit.maxHp - minimum));
+  unit.maxHp -= decrease;
+  if (unit.currentHp > minimum) unit.currentHp = Math.max(minimum, unit.currentHp - decrease);
+  unit.currentHp = Math.min(unit.currentHp, unit.maxHp);
+  return -decrease;
+}
+
+function adjustAllStats(unit, amount, { hpFloorAtTen = false } = {}) {
+  const delta = Math.trunc(Number(amount) || 0);
+  adjustHp(unit, delta * settings.hpMultiplier, { floorAtTen: hpFloorAtTen });
+  if (delta >= 0) {
+    unit.attack += delta;
+    unit.defense += delta;
+    unit.speed += delta;
+  } else {
+    unit.attack = Math.max(0, unit.attack + delta);
+    unit.defense = Math.max(0, unit.defense + delta);
+    unit.speed = Math.max(0, unit.speed + delta);
+  }
+}
+
+function gainMemory(unit, amount = 1) {
+  const gained = Math.max(0, Math.trunc(Number(amount) || 0));
+  unit.memory += gained;
+  unit.attack -= gained;
+  return gained;
+}
+
+function clearMemory(unit) {
+  const removed = Math.max(0, Number(unit.memory || 0));
+  unit.memory = 0;
+  unit.attack += removed;
+  return removed;
+}
+
+function moveToFront(unit) {
+  if (!unit || unit.slot === 0) return false;
+  const front = battle.units.find(item => item.side === unit.side && item.slot === 0);
+  if (front) front.slot = unit.slot;
+  unit.slot = 0;
+  return true;
+}
+
+function basicDamageFor(actor, target, { ignoreDefense = false } = {}) {
+  const defense = ignoreDefense ? 0 : target.defense;
+  return Math.max(settings.minDamage, Math.floor(effectiveAttack(actor) * settings.attackFactor - defense));
+}
+
+function executeUnit(actor, target) {
+  if (!target?.alive) return null;
+  const hpBefore = target.currentHp;
+  target.currentHp = 0;
+  target.shield = 0;
+  target.alive = false;
+  actor.damageDealt += hpBefore;
+  actor.directDamage += hpBefore;
+  const result = {
+    target,
+    dodged: false,
+    dodgeRoll: null,
+    dodgeChance: 0,
+    rawDamage: hpBefore,
+    shieldAbsorb: 0,
+    hpDamage: hpBefore,
+    hpBefore,
+    hpAfter: 0,
+    knockout: true,
+    nullified: false,
+    executed: true
+  };
+  onKnockout(actor, target);
+  return result;
+}
+
 function healUnit(source, target, amount) {
   if (!target?.alive) return { healed: 0, shield: 0 };
   const requested = Math.max(0, Math.floor(Number(amount) || 0));
@@ -573,12 +752,32 @@ function applyHarmfulStatus(target, type, payload = {}) {
     if (!target.statuses.current) target.statuses.current = { sourceUid: payload.sourceUid };
     return true;
   }
+  if (type === "paralysis") {
+    if (!target.statuses.paralysis) target.statuses.paralysis = { sourceUid: payload.sourceUid };
+    return true;
+  }
+  if (type === "binding") {
+    if (!target.statuses.binding) target.statuses.binding = { sourceUid: payload.sourceUid, count: 0 };
+    target.statuses.binding.count += Math.max(1, Number(payload.count || 1));
+    return true;
+  }
+  if (type === "bloodScent") {
+    target.statuses.bloodScent = {
+      sourceUid: payload.sourceUid,
+      expiresAfterSourceAction: Number(payload.expiresAfterSourceAction || 1)
+    };
+    return true;
+  }
   return false;
 }
 
 function applyDamage(target, rawDamage, { bypassShield = false } = {}) {
   const normalized = Number.isFinite(rawDamage) ? Math.max(0, Math.floor(rawDamage)) : target.currentHp + target.shield;
   const wasAlive = target.alive;
+  if (wasAlive && normalized > 0 && passiveEffect(target).id === "first_damage_null" && !target.firstDamageBlocked) {
+    target.firstDamageBlocked = true;
+    return { rawDamage: 0, attemptedDamage: normalized, shieldAbsorb: 0, hpDamage: 0, hpBefore: target.currentHp, hpAfter: target.currentHp, knockout: false, nullified: true };
+  }
   const shieldAbsorb = bypassShield ? 0 : Math.min(target.shield, normalized);
   target.shield -= shieldAbsorb;
   const hpLoss = Math.max(0, normalized - shieldAbsorb);
@@ -586,18 +785,28 @@ function applyDamage(target, rawDamage, { bypassShield = false } = {}) {
   target.currentHp = Math.max(0, target.currentHp - hpLoss);
   const hpDamage = hpBefore - target.currentHp;
   if (target.currentHp <= 0) target.alive = false;
-  return { rawDamage: normalized, shieldAbsorb, hpDamage, hpBefore, hpAfter: target.currentHp, knockout: wasAlive && !target.alive };
+  return { rawDamage: normalized, attemptedDamage: normalized, shieldAbsorb, hpDamage, hpBefore, hpAfter: target.currentHp, knockout: wasAlive && !target.alive, nullified: false };
 }
 
 function damageWithPassives(actor, target, rawDamage) {
   let adjusted = Math.max(0, Number(rawDamage) || 0);
   if (passiveEffect(actor).id === "blood_excitement" && actor.type === target.type) adjusted *= 1.2;
+  if (passiveEffect(actor).id === "swift_pressure" && effectiveSpeed(actor) > effectiveSpeed(target)) adjusted *= 1.3;
+  if (passiveEffect(actor).id === "poison_spray" && target.statuses.poison) adjusted *= 1.5;
   if (target.statuses.mark?.sourceUid === actor.uid) adjusted *= 1.2;
   return Math.floor(adjusted);
 }
 
 function onKnockout(source, target) {
-  if (!source) return;
+  for (const unit of battle.units.filter(item => item.alive && passiveEffect(item).id === "primal_predation")) {
+    unit.attack += 1;
+    unit.speed += 1;
+    pushLog({ kind: "passive", label: "KO", message: `${unit.name}의 원시의 포식 · 공격력 +1 · 속도 +1` });
+  }
+  for (const unit of battle.units) {
+    if (unit.statuses.bloodScent?.sourceUid === target.uid) delete unit.statuses.bloodScent;
+  }
+  if (!source || source.uid === target.uid) return;
   source.kills += 1;
   if (source.mechanicRole === "돌격자" && source.alive) {
     const recovery = Math.floor(source.maxHp * 0.05);
@@ -618,12 +827,19 @@ function onKnockout(source, target) {
 function resolveHit(actor, target, rawDamage, { allowDodge = true } = {}) {
   let dodgeRoll = null;
   let dodged = false;
-  if (allowDodge && target.mechanicRole === "교란자") {
+  const chance = actor.sureHit ? 0 : dodgeChance(target);
+  if (allowDodge && chance > 0) {
     dodgeRoll = battle.rng();
-    dodged = dodgeRoll < settings.dodgeRate / 100;
+    dodged = dodgeRoll < chance / 100;
   }
+  if (passiveEffect(actor).id === "sacrificial_self_harm") actor.selfHarm += 1;
+  if (passiveEffect(target).id === "current_wrap" && actor.alive) {
+    const paralysisRoll = battle.rng();
+    if (paralysisRoll < 0.5) applyHarmfulStatus(actor, "paralysis", { sourceUid: target.uid });
+  }
+  if (target.alive && passiveEffect(target).id === "vengeful_blade") gainMemory(target, 1);
   if (dodged) {
-    return { target, dodged: true, dodgeRoll, rawDamage: 0, shieldAbsorb: 0, hpDamage: 0, hpBefore: target.currentHp, hpAfter: target.currentHp, knockout: false };
+    return { target, dodged: true, dodgeRoll, dodgeChance: chance, rawDamage: 0, shieldAbsorb: 0, hpDamage: 0, hpBefore: target.currentHp, hpAfter: target.currentHp, knockout: false, nullified: false };
   }
   const adjusted = damageWithPassives(actor, target, rawDamage);
   const result = applyDamage(target, adjusted);
@@ -631,12 +847,15 @@ function resolveHit(actor, target, rawDamage, { allowDodge = true } = {}) {
   actor.directDamage += result.hpDamage;
   if (passiveEffect(target).id === "charge_on_hit") target.charge += 1;
   if (passiveEffect(target).id === "amplified_armor") target.attack += 2;
+  if (passiveEffect(target).id === "swarm_body" && target.swarm > 0) target.swarm -= 1;
   if (result.knockout) onKnockout(actor, target);
-  return { target, dodged: false, dodgeRoll, ...result };
+  return { target, dodged: false, dodgeRoll, dodgeChance: chance, ...result };
 }
 
 function hitText(hit) {
-  if (hit.dodged) return `${hit.target.name} 회피(${hit.dodgeRoll.toFixed(3)})`;
+  if (hit.dodged) return `${hit.target.name} 회피 ${hit.dodgeChance}%(${hit.dodgeRoll.toFixed(3)})`;
+  if (hit.nullified) return `${hit.target.name} 첫 피해 무효`;
+  if (hit.executed) return `${hit.target.name} 처형·전투불능`;
   const shield = hit.shieldAbsorb ? `·보호막 ${hit.shieldAbsorb}` : "";
   const knockout = hit.knockout ? "·전투불능" : "";
   return `${hit.target.name} ${hit.hpBefore}→${hit.hpAfter}${shield}${knockout}`;
@@ -666,16 +885,22 @@ function afterDirectDamage(actor, totalHpDamage) {
 }
 
 function executeBasicAttack(actor) {
-  const target = selectTarget(actor);
-  if (!target) return { hits: [], notes: ["공격할 대상 없음"] };
-  const rawDamage = Math.max(settings.minDamage, Math.floor(effectiveAttack(actor) * settings.attackFactor - target.defense));
-  const hit = resolveHit(actor, target, rawDamage);
+  const scented = passiveEffect(actor).id === "prey_found"
+    ? aliveUnits(enemySide(actor.side)).filter(unit => unit.statuses.bloodScent?.sourceUid === actor.uid).sort((left, right) => left.slot - right.slot)
+    : [];
+  const targets = scented.length ? scented : [selectTarget(actor)].filter(Boolean);
+  if (!targets.length) return { hits: [], notes: ["공격할 대상 없음"] };
+  const hits = targets.map(target => resolveHit(actor, target, basicDamageFor(actor, target)));
   const notes = [];
-  if (!hit.dodged && target.alive && passiveEffect(actor).id === "mark_prey") {
-    const applied = applyHarmfulStatus(target, "mark", { sourceUid: actor.uid });
-    notes.push(applied ? `${target.name} 표식` : `${target.name} 표식 면역`);
+  if (scented.length) notes.push(`피냄새 대상 ${scented.length}명 공격`);
+  for (const hit of hits) {
+    const target = hit.target;
+    if (!hit.dodged && target.alive && passiveEffect(actor).id === "mark_prey") {
+      const applied = applyHarmfulStatus(target, "mark", { sourceUid: actor.uid });
+      notes.push(applied ? `${target.name} 표식` : `${target.name} 표식 면역`);
+    }
   }
-  return { hits: [hit], notes };
+  return { hits, notes };
 }
 
 function executeSkill(actor, skill) {
@@ -806,6 +1031,145 @@ function executeSkill(actor, skill) {
         notes.push(`${target.name} 보호막 +${gained}`);
       }
       break;
+    case "surprise_strike": {
+      const target = selectTarget(actor, skill.id);
+      const missingRatio = target ? 1 - target.currentHp / target.maxHp : 0;
+      hitOne(target, attack * (1 + missingRatio));
+      notes.push(`잃은 HP ${Math.floor(missingRatio * 100)}% · 배율 ${(1 + missingRatio).toFixed(2)}`);
+      break;
+    }
+    case "wraith_advance": {
+      const swarm = Math.max(0, actor.swarm);
+      enemies.slice(0, Math.min(swarm, enemies.length)).forEach(target => hitOne(target, swarm * attack));
+      actor.swarm = Math.min(3, actor.swarm + 1);
+      notes.push(`군체 ${swarm} 기준 대상 ${hits.length}명 · 군체 ${actor.swarm}`);
+      break;
+    }
+    case "express_delivery": {
+      const target = selectTarget(actor, skill.id);
+      const repeat = target && speed > effectiveSpeed(target) ? 3 : 2;
+      for (let index = 0; index < repeat && target?.alive; index += 1) hitOne(target, basicDamageFor(actor, target, { ignoreDefense: true }));
+      notes.push(`방어 무시 ${repeat}회 공격`);
+      break;
+    }
+    case "pierce": {
+      const target = selectTarget(actor, skill.id);
+      const stun = applyHarmfulStatus(target, "stun", { sourceUid: actor.uid, actions: 1 });
+      const poison = applyHarmfulStatus(target, "poison", { sourceUid: actor.uid });
+      const actorMoved = moveToFront(actor);
+      const targetMoved = moveToFront(target);
+      notes.push(`${target.name} ${stun ? "기절" : "기절 면역"} · ${poison ? "독" : "독 면역"}${actorMoved || targetMoved ? " · 양 팀 1번 위치 이동" : ""}`);
+      break;
+    }
+    case "descent": {
+      const repeat = Math.max(0, actor.selfHarm);
+      for (let count = 0; count < repeat; count += 1) {
+        for (const target of aliveUnits(enemySide(actor.side)).sort((left, right) => left.slot - right.slot)) {
+          hitOne(target, basicDamageFor(actor, target));
+        }
+      }
+      notes.push(`사용 직전 자해 ${repeat} · 전체 공격 ${repeat}회`);
+      break;
+    }
+    case "paralysis_release":
+      for (const target of enemies) notes.push(applyHarmfulStatus(target, "paralysis", { sourceUid: actor.uid }) ? `${target.name} 마비` : `${target.name} 마비 면역`);
+      notes.push(applyHarmfulStatus(actor, "paralysis", { sourceUid: actor.uid }) ? `${actor.name} 마비` : `${actor.name} 마비 면역`);
+      break;
+    case "black_feather": {
+      const target = selectTarget(actor, skill.id);
+      hitOne(target, basicDamageFor(actor, target));
+      adjustAllStats(actor, 2);
+      notes.push(`모든 스탯 +2 · HP ${actor.currentHp}/${actor.maxHp}`);
+      break;
+    }
+    case "orca_strike": {
+      const target = selectTarget(actor, skill.id);
+      hitOne(target, attack * 3);
+      if (target?.alive && target.currentHp <= 15) {
+        const execution = executeUnit(actor, target);
+        if (execution) hits.push(execution);
+        notes.push(`${target.name} HP 15 이하 처형`);
+      }
+      break;
+    }
+    case "predation": {
+      const target = selectTarget(actor, skill.id);
+      const lowHp = target && target.currentHp / target.maxHp < 0.5;
+      hitOne(target, attack * 2.5 * (lowHp ? 1.3 : 1));
+      if (lowHp) notes.push("대상 HP 50% 미만 · 피해 +30%");
+      break;
+    }
+    case "web_bind": {
+      const target = selectTarget(actor, skill.id);
+      const actorSpeed = speed;
+      const targetSpeed = target ? effectiveSpeed(target) : 0;
+      const hit = hitOne(target, target ? basicDamageFor(actor, target) : 0);
+      if (hit && !hit.dodged && target.alive) {
+        if (targetSpeed < actorSpeed) {
+          const applied = applyHarmfulStatus(target, "binding", { sourceUid: actor.uid, count: 1 });
+          if (!applied) notes.push(`${target.name} 속박 면역`);
+          else {
+            const count = target.statuses.binding.count;
+            notes.push(`${target.name} 속박 ${count}`);
+            if (count === 2) {
+              applyHarmfulStatus(target, "stun", { sourceUid: actor.uid, actions: 1 });
+              notes.push("속박 2 · 기절");
+            }
+            if (count >= 3) {
+              const execution = executeUnit(actor, target);
+              if (execution) hits.push(execution);
+              notes.push("속박 3 · 처형");
+            }
+          }
+        } else if (targetSpeed > actorSpeed) {
+          const applied = applyHarmfulStatus(target, "paralysis", { sourceUid: actor.uid });
+          notes.push(applied ? `${target.name} 마비` : `${target.name} 마비 면역`);
+        } else notes.push("동일 속도 · 상태 없음");
+      }
+      break;
+    }
+    case "kind_greeting":
+      for (const target of allies) {
+        target.attack += 3;
+        notes.push(`${target.name} 공격력 +3`);
+      }
+      break;
+    case "moonlight_moment": {
+      const multiplier = { crescent: 2, half: 3, full: 4 }[actor.lunarPhase] || 1;
+      hitOne(selectTarget(actor, skill.id), attack * multiplier);
+      notes.push(`${{ crescent: "그믐", half: "반월", full: "만월" }[actor.lunarPhase] || "무상태"} · 공격력 ×${multiplier}`);
+      break;
+    }
+    case "bite": {
+      const targets = [...enemies].sort((left, right) => right.slot - left.slot).slice(0, 2);
+      for (const target of targets) {
+        const hit = hitOne(target, basicDamageFor(actor, target));
+        if (hit && !hit.dodged && target.alive) {
+          applyHarmfulStatus(target, "bloodScent", { sourceUid: actor.uid, expiresAfterSourceAction: actor.actionsTaken + 1 });
+          notes.push(`${target.name} 피냄새`);
+        }
+      }
+      break;
+    }
+    case "flurry": {
+      const repeat = Math.max(0, actor.wild);
+      for (let count = 0; count < repeat; count += 1) {
+        const candidates = aliveUnits(enemySide(actor.side));
+        if (!candidates.length) break;
+        const target = candidates[Math.floor(battle.rng() * candidates.length)];
+        hitOne(target, basicDamageFor(actor, target));
+      }
+      notes.push(`야성 ${repeat} · 무작위 공격 ${hits.length}회`);
+      break;
+    }
+    case "memory_barrage": {
+      const target = selectTarget(actor, skill.id);
+      const repeat = Math.max(0, actor.memory);
+      for (let count = 0; count < repeat && target?.alive; count += 1) hitOne(target, basicDamageFor(actor, target));
+      const removed = clearMemory(actor);
+      notes.push(`암기 ${repeat} 기준 ${hits.length}회 공격 · 암기 ${removed} 제거 · 공격력 +${removed}`);
+      break;
+    }
     default:
       hitOne(selectTarget(actor, skill.id), settings.skillDamage);
       break;
@@ -841,9 +1205,31 @@ function finishTurn() {
       statusMessages.push(`${unit.name} 출혈 5% · HP ${result.hpBefore}→${result.hpAfter}`);
       if (result.knockout) onKnockout(source, unit);
     }
+    if (unit.alive && unit.selfHarm > 0) {
+      const percent = unit.selfHarm;
+      const result = applyDamage(unit, Math.floor(unit.maxHp * percent / 100), { bypassShield: true });
+      statusMessages.push(`${unit.name} 자해 ${unit.selfHarm}×1% · HP ${result.hpBefore}→${result.hpAfter}${result.nullified ? " · 피해 무효" : ""}`);
+      if (result.knockout) onKnockout(null, unit);
+    }
+    if (unit.alive && unit.statuses.bloodScent) {
+      const status = unit.statuses.bloodScent;
+      const source = battle.units.find(item => item.uid === status.sourceUid) || null;
+      const result = applyDamage(unit, Math.floor(unit.maxHp * 0.025), { bypassShield: true });
+      if (source) {
+        source.damageDealt += result.hpDamage;
+        source.statusDamage += result.hpDamage;
+      }
+      statusMessages.push(`${unit.name} 피냄새 2.5% · HP ${result.hpBefore}→${result.hpAfter}${result.nullified ? " · 피해 무효" : ""}`);
+      if (result.knockout) onKnockout(source, unit);
+    }
   }
   if (statusMessages.length) pushLog({ kind: "status", label, message: statusMessages.join(" / ") });
   if (checkWinner()) return;
+
+  for (const unit of battle.units.filter(item => item.alive && passiveEffect(item).id === "limited_time")) {
+    adjustAllStats(unit, -2, { hpFloorAtTen: true });
+    pushLog({ kind: "passive", label, message: `${unit.name}의 한정된 시간 · 모든 스탯 -2 · HP ${unit.currentHp}/${unit.maxHp} · 공격 ${unit.attack} · 방어 ${unit.defense} · 속도 ${unit.speed}` });
+  }
 
   for (const source of battle.units.filter(item => item.alive && passiveEffect(item).id === "life_affinity")) {
     const healed = [];
@@ -854,6 +1240,18 @@ function finishTurn() {
     if (healed.length) pushLog({ kind: "passive", label, message: `${source.name}의 생명친화 · ${healed.join(" / ")}` });
   }
   pushLog({ kind: "system", label, message: `${battle.turn}턴 종료` });
+}
+
+function expireBloodScentAfterAction(actor, notes = []) {
+  const expired = [];
+  for (const unit of battle.units) {
+    const status = unit.statuses.bloodScent;
+    if (status?.sourceUid === actor.uid && actor.actionsTaken >= status.expiresAfterSourceAction) {
+      delete unit.statuses.bloodScent;
+      expired.push(unit.name);
+    }
+  }
+  if (expired.length) notes.push(`피냄새 제거: ${expired.join(", ")}`);
 }
 
 function advanceOneAction({ render = true } = {}) {
@@ -881,10 +1279,13 @@ function advanceOneAction({ render = true } = {}) {
 
   battle.currentActorUid = actor.uid;
   battle.actionInTurn += 1;
+  actor.actionsTaken += 1;
   const label = `T${battle.turn}.${String(battle.actionInTurn).padStart(2, "0")}`;
   if (actor.statuses.stunActions > 0) {
     actor.statuses.stunActions -= 1;
-    pushLog({ kind: "status", side: actor.side, action: "stun", label, message: `${actor.name}은(는) 기절로 행동하지 못했습니다.` });
+    const notes = [];
+    expireBloodScentAfterAction(actor, notes);
+    pushLog({ kind: "status", side: actor.side, action: "stun", label, message: `${actor.name}은(는) 기절로 행동하지 못했습니다.${notes.length ? ` · ${notes.join(" · ")}` : ""}` });
     if (render) renderAll();
     return true;
   }
@@ -902,6 +1303,7 @@ function advanceOneAction({ render = true } = {}) {
   const outcome = usesSkill ? executeSkill(actor, skill) : executeBasicAttack(actor);
   const totalHpDamage = outcome.hits.reduce((sum, hit) => sum + hit.hpDamage, 0);
   outcome.notes.push(...afterDirectDamage(actor, totalHpDamage));
+  expireBloodScentAfterAction(actor, outcome.notes);
   actor.grit += settings.gritGain;
   battle.lastTargetUid = outcome.hits[0]?.target.uid || null;
 
@@ -1090,6 +1492,10 @@ function renderRules() {
     ["문서 미정 스킬", `개별 스킬이 비어 있는 캐릭터만 투지 ${settings.skillCost} · 방어 무시 고정 피해 ${settings.skillDamage} 임시 규칙 적용`],
     ["독", "부여된 턴 종료부터 보호막을 무시하고 현재 HP의 2% → 4% → 8% → 16%… 피해 · 재부여 시 중첩/초기화 없음"],
     ["출혈", "부여된 턴 종료부터 보호막을 무시하고 매 턴 최대 HP의 5% 피해 · 재부여 시 중첩 없음"],
+    ["자해 / 피냄새", "턴 종료 시 보호막을 무시하고 자해는 중첩당 최대 HP 1%, 피냄새는 최대 HP 2.5% 피해"],
+    ["마비", "전투 종료까지 속도를 절반으로 감소 · 중복 부여되어도 한 번만 적용"],
+    ["회피 / 필중", "역할군·군체·야성·암기의 회피율을 합산해 최대 100% 적용 · 필중은 모든 회피를 무시"],
+    ["체력 스탯", `체력 1은 최대·현재 HP ${settings.hpMultiplier}으로 환산 · 아젤리아의 턴 종료 감소는 HP 10 아래로 내리지 않음`],
     ["정수 처리", "피해·회복·보호막의 소수점은 내림 · 회복은 최대 HP를 초과하지 않음"],
     ["암살자", ROLE_EFFECTS["암살자"].description],
     ["보호자 / 치유자", ROLE_EFFECTS["보호자"].description],
